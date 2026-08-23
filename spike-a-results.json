@@ -1,0 +1,460 @@
+[
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.blinkhouse.benchmark.SpikeABenchmark.insertClientV2",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk@21/21.0.7/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+            "-Xms512m",
+            "-Xmx1g",
+            "-Dbh.clickhouse.url=http://localhost:53338",
+            "-Dbh.clickhouse.user=bh_test",
+            "-Dbh.clickhouse.password=bh_test"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7",
+        "warmupIterations" : 2,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "20 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "100000"
+        },
+        "primaryMetric" : {
+            "score" : 5.979288581016625,
+            "scoreError" : 0.745732805915407,
+            "scoreConfidence" : [
+                5.233555775101219,
+                6.725021386932032
+            ],
+            "scorePercentiles" : {
+                "0.0" : 5.939272683753349,
+                "50.0" : 5.977619258201489,
+                "90.0" : 6.020973801095036,
+                "95.0" : 6.020973801095036,
+                "99.0" : 6.020973801095036,
+                "99.9" : 6.020973801095036,
+                "99.99" : 6.020973801095036,
+                "99.999" : 6.020973801095036,
+                "99.9999" : 6.020973801095036,
+                "100.0" : 6.020973801095036
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    6.020973801095036,
+                    5.939272683753349,
+                    5.977619258201489
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.blinkhouse.benchmark.SpikeABenchmark.insertHttpRowBinary",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk@21/21.0.7/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+            "-Xms512m",
+            "-Xmx1g",
+            "-Dbh.clickhouse.url=http://localhost:53338",
+            "-Dbh.clickhouse.user=bh_test",
+            "-Dbh.clickhouse.password=bh_test"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7",
+        "warmupIterations" : 2,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "20 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "100000"
+        },
+        "primaryMetric" : {
+            "score" : 29.384337011639712,
+            "scoreError" : 7.875516140193491,
+            "scoreConfidence" : [
+                21.508820871446222,
+                37.259853151833205
+            ],
+            "scorePercentiles" : {
+                "0.0" : 28.893396825610406,
+                "50.0" : 29.55508064861054,
+                "90.0" : 29.704533560698177,
+                "95.0" : 29.704533560698177,
+                "99.0" : 29.704533560698177,
+                "99.9" : 29.704533560698177,
+                "99.99" : 29.704533560698177,
+                "99.999" : 29.704533560698177,
+                "99.9999" : 29.704533560698177,
+                "100.0" : 29.704533560698177
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    29.704533560698177,
+                    28.893396825610406,
+                    29.55508064861054
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.blinkhouse.benchmark.SpikeABenchmark.insertJdbc",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk@21/21.0.7/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+            "-Xms512m",
+            "-Xmx1g",
+            "-Dbh.clickhouse.url=http://localhost:53338",
+            "-Dbh.clickhouse.user=bh_test",
+            "-Dbh.clickhouse.password=bh_test"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7",
+        "warmupIterations" : 2,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "20 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "100000"
+        },
+        "primaryMetric" : {
+            "score" : 4.308877255532852,
+            "scoreError" : 0.304553012035528,
+            "scoreConfidence" : [
+                4.004324243497324,
+                4.613430267568379
+            ],
+            "scorePercentiles" : {
+                "0.0" : 4.290908539056523,
+                "50.0" : 4.311818479137935,
+                "90.0" : 4.323904748404097,
+                "95.0" : 4.323904748404097,
+                "99.0" : 4.323904748404097,
+                "99.9" : 4.323904748404097,
+                "99.99" : 4.323904748404097,
+                "99.999" : 4.323904748404097,
+                "99.9999" : 4.323904748404097,
+                "100.0" : 4.323904748404097
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    4.311818479137935,
+                    4.323904748404097,
+                    4.290908539056523
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.blinkhouse.benchmark.SpikeABenchmark.scanHttpRowBinary",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk@21/21.0.7/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+            "-Xms512m",
+            "-Xmx1g",
+            "-Dbh.clickhouse.url=http://localhost:53338",
+            "-Dbh.clickhouse.user=bh_test",
+            "-Dbh.clickhouse.password=bh_test"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7",
+        "warmupIterations" : 2,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "20 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "100000"
+        },
+        "primaryMetric" : {
+            "score" : 7.708089452056033,
+            "scoreError" : 41.21304183593117,
+            "scoreConfidence" : [
+                -33.504952383875136,
+                48.92113128798721
+            ],
+            "scorePercentiles" : {
+                "0.0" : 6.245129627547346,
+                "50.0" : 6.569272760416563,
+                "90.0" : 10.309865968204187,
+                "95.0" : 10.309865968204187,
+                "99.0" : 10.309865968204187,
+                "99.9" : 10.309865968204187,
+                "99.99" : 10.309865968204187,
+                "99.999" : 10.309865968204187,
+                "99.9999" : 10.309865968204187,
+                "100.0" : 10.309865968204187
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    10.309865968204187,
+                    6.569272760416563,
+                    6.245129627547346
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.blinkhouse.benchmark.SpikeABenchmark.insertClientV2",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk@21/21.0.7/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+            "-Xms512m",
+            "-Xmx1g",
+            "-Dbh.clickhouse.url=http://localhost:53338",
+            "-Dbh.clickhouse.user=bh_test",
+            "-Dbh.clickhouse.password=bh_test"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7",
+        "warmupIterations" : 2,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "20 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "100000"
+        },
+        "primaryMetric" : {
+            "score" : 0.17202661398567698,
+            "scoreError" : 0.12023548586934346,
+            "scoreConfidence" : [
+                0.05179112811633352,
+                0.29226209985502044
+            ],
+            "scorePercentiles" : {
+                "0.0" : 0.165886121553719,
+                "50.0" : 0.17120383796581196,
+                "90.0" : 0.1789898824375,
+                "95.0" : 0.1789898824375,
+                "99.0" : 0.1789898824375,
+                "99.9" : 0.1789898824375,
+                "99.99" : 0.1789898824375,
+                "99.999" : 0.1789898824375,
+                "99.9999" : 0.1789898824375,
+                "100.0" : 0.1789898824375
+            },
+            "scoreUnit" : "s/op",
+            "rawData" : [
+                [
+                    0.17120383796581196,
+                    0.1789898824375,
+                    0.165886121553719
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.blinkhouse.benchmark.SpikeABenchmark.insertHttpRowBinary",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk@21/21.0.7/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+            "-Xms512m",
+            "-Xmx1g",
+            "-Dbh.clickhouse.url=http://localhost:53338",
+            "-Dbh.clickhouse.user=bh_test",
+            "-Dbh.clickhouse.password=bh_test"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7",
+        "warmupIterations" : 2,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "20 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "100000"
+        },
+        "primaryMetric" : {
+            "score" : 0.032587717101315826,
+            "scoreError" : 0.04017046738895593,
+            "scoreConfidence" : [
+                -0.007582750287640105,
+                0.07275818449027176
+            ],
+            "scorePercentiles" : {
+                "0.0" : 0.030929314851622876,
+                "50.0" : 0.031747922412044376,
+                "90.0" : 0.03508591404028021,
+                "95.0" : 0.03508591404028021,
+                "99.0" : 0.03508591404028021,
+                "99.9" : 0.03508591404028021,
+                "99.99" : 0.03508591404028021,
+                "99.999" : 0.03508591404028021,
+                "99.9999" : 0.03508591404028021,
+                "100.0" : 0.03508591404028021
+            },
+            "scoreUnit" : "s/op",
+            "rawData" : [
+                [
+                    0.03508591404028021,
+                    0.031747922412044376,
+                    0.030929314851622876
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.blinkhouse.benchmark.SpikeABenchmark.insertJdbc",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk@21/21.0.7/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+            "-Xms512m",
+            "-Xmx1g",
+            "-Dbh.clickhouse.url=http://localhost:53338",
+            "-Dbh.clickhouse.user=bh_test",
+            "-Dbh.clickhouse.password=bh_test"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7",
+        "warmupIterations" : 2,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "20 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "100000"
+        },
+        "primaryMetric" : {
+            "score" : 0.22994012666226923,
+            "scoreError" : 0.04056881345866719,
+            "scoreConfidence" : [
+                0.18937131320360204,
+                0.2705089401209364
+            ],
+            "scorePercentiles" : {
+                "0.0" : 0.22767552414772727,
+                "50.0" : 0.23002429454022988,
+                "90.0" : 0.2321205612988506,
+                "95.0" : 0.2321205612988506,
+                "99.0" : 0.2321205612988506,
+                "99.9" : 0.2321205612988506,
+                "99.99" : 0.2321205612988506,
+                "99.999" : 0.2321205612988506,
+                "99.9999" : 0.2321205612988506,
+                "100.0" : 0.2321205612988506
+            },
+            "scoreUnit" : "s/op",
+            "rawData" : [
+                [
+                    0.22767552414772727,
+                    0.2321205612988506,
+                    0.23002429454022988
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.blinkhouse.benchmark.SpikeABenchmark.scanHttpRowBinary",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk@21/21.0.7/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+            "-Xms512m",
+            "-Xmx1g",
+            "-Dbh.clickhouse.url=http://localhost:53338",
+            "-Dbh.clickhouse.user=bh_test",
+            "-Dbh.clickhouse.password=bh_test"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7",
+        "warmupIterations" : 2,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "20 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "100000"
+        },
+        "primaryMetric" : {
+            "score" : 0.12407705626656285,
+            "scoreError" : 0.49645504378941874,
+            "scoreConfidence" : [
+                -0.3723779875228559,
+                0.6205321000559816
+            ],
+            "scorePercentiles" : {
+                "0.0" : 0.09599982715311005,
+                "50.0" : 0.12589825209433964,
+                "90.0" : 0.1503330895522388,
+                "95.0" : 0.1503330895522388,
+                "99.0" : 0.1503330895522388,
+                "99.9" : 0.1503330895522388,
+                "99.99" : 0.1503330895522388,
+                "99.999" : 0.1503330895522388,
+                "99.9999" : 0.1503330895522388,
+                "100.0" : 0.1503330895522388
+            },
+            "scoreUnit" : "s/op",
+            "rawData" : [
+                [
+                    0.09599982715311005,
+                    0.12589825209433964,
+                    0.1503330895522388
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    }
+]
+
+
