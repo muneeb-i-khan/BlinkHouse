@@ -1,6 +1,6 @@
 # BlinkHouse
 
-**A ClickHouse-native persistence framework for Java and Spring Boot.**
+**ClickHouse set-up in a blink for your Java application.**
 
 Not an ORM. ClickHouse is a columnar OLAP database — it has no row-level identity, no transactions, no dirty checking, and no foreign keys. BlinkHouse doesn't pretend otherwise. What it gives you instead:
 
