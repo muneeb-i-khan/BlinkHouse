@@ -1,0 +1,2 @@
+io.blinkhouse.boot.BlinkHouseAutoConfiguration
+io.blinkhouse.boot.BlinkHouseMetricsAutoConfiguration

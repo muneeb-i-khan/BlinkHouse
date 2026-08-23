@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.blinkhouse</groupId>
+        <artifactId>blinkhouse-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>blinkhouse-processor</artifactId>
+    <name>BlinkHouse :: Annotation Processor</name>
+    <description>
+        Optional annotation processor that generates compile-time metamodel classes (PageView_, etc.)
+        enabling typed column references in the query DSL. The string-based API works without this.
+    </description>
+
+    <dependencies>
+        <!-- Core for annotation definitions only — compile-time, not runtime dep of end users -->
+        <dependency>
+            <groupId>io.blinkhouse</groupId>
+            <artifactId>blinkhouse-core</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Auto-register the processor via ServiceLoader -->
+        <dependency>
+            <groupId>com.google.auto.service</groupId>
+            <artifactId>auto-service-annotations</artifactId>
+            <version>1.1.1</version>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <!-- auto-service generates the processor registration -->
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>com.google.auto.service</groupId>
+                            <artifactId>auto-service</artifactId>
+                            <version>1.1.1</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

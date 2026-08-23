@@ -1,0 +1,11 @@
+{
+  "groups": [
+    {
+      "name": "clickhouse",
+      "type": "io.blinkhouse.boot.BlinkHouseProperties",
+      "sourceType": "io.blinkhouse.boot.BlinkHouseProperties"
+    }
+  ],
+  "properties": [],
+  "hints": []
+}

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.blinkhouse</groupId>
+        <artifactId>blinkhouse-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>blinkhouse-examples</artifactId>
+    <packaging>pom</packaging>
+    <name>BlinkHouse :: Examples</name>
+    <description>
+        Reference analytics application — event ingest + dashboard API.
+        Demonstrates the full BlinkHouse stack end-to-end.
+        NOT published to Maven Central.
+    </description>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
+    <!-- Sub-modules added as the reference app is built (Phase 8) -->
+    <!-- <modules> -->
+    <!--     <module>analytics-service</module> -->
+    <!-- </modules> -->
+</project>

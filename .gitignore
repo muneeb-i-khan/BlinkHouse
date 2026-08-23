@@ -1,3 +1,4 @@
+# Maven build output
 target/
 pom.xml.tag
 pom.xml.releaseBackup
@@ -10,8 +11,33 @@ buildNumber.properties
 # https://maven.apache.org/tools/wrapper/#Usage_with_or_without_Binary_JAR
 .mvn/wrapper/maven-wrapper.jar
 
-# Eclipse m2e generated files
-# Eclipse Core
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Eclipse
 .project
-# JDT-specific (Eclipse Java Development Tools)
 .classpath
+.settings/
+.factorypath
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated sources (annotation processor output)
+**/generated-sources/
+**/generated-test-sources/
+
+# JMH benchmark fat jar
+blinkhouse-benchmark/target/benchmarks.jar
+
+# Spring Boot configuration metadata (generated, not hand-edited)
+**/META-INF/spring-configuration-metadata.json
