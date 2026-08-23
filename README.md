@@ -35,7 +35,7 @@ The "Coming from JPA" guide lives in the docs site and is considered a feature, 
 |---|---|---|
 | A — Transport bake-off | Done | Raw HTTP + RowBinary: ~2.9M rows/sec. Split transport selected (see `docs/adr/ADR-04-transport.md`). |
 | B — Type round-trip | Done | 12/12 hard types correct. JSON skipped (internal binary format — tracked). |
-| C — Spring Data SPI | Pending | — |
+| C — Spring Data SPI | Done | `@EnableClickHouseRepositories` + `RepositoryFactoryBean` SPI wires correctly. Fragment composition dispatched through proxy. No need to implement proxying from scratch (Q-5). |
 
 ---
 

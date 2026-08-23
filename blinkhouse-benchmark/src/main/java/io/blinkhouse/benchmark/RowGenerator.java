@@ -30,10 +30,10 @@ public final class RowGenerator {
      *   <li>{@code durationMs} = {@code i % 5_000}
      * </ul>
      */
-    public static List<SpikeARow> generate(int count) {
-        List<SpikeARow> rows = new ArrayList<>(count);
+    public static List<TransportBenchmarkRow> generate(int count) {
+        List<TransportBenchmarkRow> rows = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
-            rows.add(new SpikeARow(
+            rows.add(new TransportBenchmarkRow(
                     i % 100,
                     BASE_EPOCH_MILLIS + (long) i * 1_000L,
                     new UUID(i, i),

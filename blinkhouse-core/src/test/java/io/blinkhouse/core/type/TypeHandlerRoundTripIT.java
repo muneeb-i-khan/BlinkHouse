@@ -31,19 +31,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Integration tests that prove each Spike B type survives a ClickHouse
- * write→read round-trip without corruption.
+ * Integration tests proving each {@link TypeHandler} implementation survives a full
+ * ClickHouse write → read round-trip without corruption.
  *
  * <p>Each test:
  * <ol>
- *   <li>Drops and recreates a dedicated table</li>
- *   <li>Inserts one row via HTTP POST with RowBinary body built by the handler</li>
- *   <li>SELECTs the row back via HTTP GET with RowBinary response</li>
- *   <li>Deserialises via the handler and asserts equality with the original value</li>
+ *   <li>Drops and recreates a dedicated single-column table</li>
+ *   <li>Inserts one value via HTTP POST with a RowBinary body built by the handler</li>
+ *   <li>SELECTs the value back via HTTP GET with a RowBinary response</li>
+ *   <li>Deserialises via the same handler and asserts equality with the original value</li>
  * </ol>
  */
 @Testcontainers
-class SpikeB_TypeRoundTripIT {
+class TypeHandlerRoundTripIT {
 
     // GenericContainer avoids ClickHouseContainer's JDBC liveness probe, which cannot
     // connect to the 24.8 image (default user is restricted to loopback).
@@ -150,14 +150,14 @@ class SpikeB_TypeRoundTripIT {
     @Test
     void uint64_roundTrip() throws Exception {
         long original = Long.MAX_VALUE;
-        long result = roundTrip("spike_b_uint64", "UInt64", new UInt64Handler(), original);
+        long result = roundTrip("th_uint64", "UInt64", new UInt64Handler(), original);
         assertThat(result).isEqualTo(original);
     }
 
     @Test
     void int256_roundTrip() throws Exception {
         BigInteger original = BigInteger.TWO.pow(200).negate();
-        BigInteger result = roundTrip("spike_b_int256", "Int256", new Int256Handler(), original);
+        BigInteger result = roundTrip("th_int256", "Int256", new Int256Handler(), original);
         assertThat(result).isEqualByComparingTo(original);
     }
 
@@ -165,7 +165,7 @@ class SpikeB_TypeRoundTripIT {
     void decimal128_roundTrip() throws Exception {
         BigDecimal original = new BigDecimal("123456789.123456789");
         Decimal128Handler handler = new Decimal128Handler(9);
-        BigDecimal result = roundTrip("spike_b_decimal128", "Decimal(38,9)", handler, original);
+        BigDecimal result = roundTrip("th_decimal128", "Decimal(38,9)", handler, original);
         assertThat(result.compareTo(original)).isZero();
     }
 
@@ -174,7 +174,7 @@ class SpikeB_TypeRoundTripIT {
         Instant original = Instant.parse("2024-03-15T18:30:00.123456789Z");
         ZoneId zone = ZoneId.of("Asia/Kolkata");
         DateTime64Handler handler = new DateTime64Handler(9, zone);
-        Instant result = roundTrip("spike_b_datetime64",
+        Instant result = roundTrip("th_datetime64",
                 "DateTime64(9,'Asia/Kolkata')", handler, original);
         assertThat(result).isEqualTo(original);
     }
@@ -185,7 +185,7 @@ class SpikeB_TypeRoundTripIT {
         // LowCardinality in HTTP RowBinary uses simplified format
         Optional<String> original = Optional.of("hello world");
         // Use Nullable(String) for the column since our handler uses simplified wire format
-        Optional<String> result = roundTrip("spike_b_lc_string_nonnull",
+        Optional<String> result = roundTrip("th_lc_string_nonnull",
                 "Nullable(String)", new LowCardinalityNullableStringHandler(), original);
         assertThat(result).isEqualTo(original);
     }
@@ -193,7 +193,7 @@ class SpikeB_TypeRoundTripIT {
     @Test
     void lowCardinalityNullableString_null_roundTrip() throws Exception {
         Optional<String> original = Optional.empty();
-        Optional<String> result = roundTrip("spike_b_lc_string_null",
+        Optional<String> result = roundTrip("th_lc_string_null",
                 "Nullable(String)", new LowCardinalityNullableStringHandler(), original);
         assertThat(result).isEqualTo(original);
     }
@@ -201,7 +201,7 @@ class SpikeB_TypeRoundTripIT {
     @Test
     void arrayArrayString_roundTrip() throws Exception {
         List<List<String>> original = List.of(List.of("a", "b"), List.of("c"));
-        List<List<String>> result = roundTrip("spike_b_array_array_string",
+        List<List<String>> result = roundTrip("th_array_array_string",
                 "Array(Array(String))", new ArrayArrayStringHandler(), original);
         assertThat(result).isEqualTo(original);
     }
@@ -209,16 +209,16 @@ class SpikeB_TypeRoundTripIT {
     @Test
     void mapStringArrayUInt32_roundTrip() throws Exception {
         Map<String, List<Long>> original = Map.of("key1", List.of(0L, 4294967295L));
-        Map<String, List<Long>> result = roundTrip("spike_b_map_str_arr_uint32",
+        Map<String, List<Long>> result = roundTrip("th_map_str_arr_uint32",
                 "Map(String, Array(UInt32))", new MapStringArrayUInt32Handler(), original);
         assertThat(result).isEqualTo(original);
     }
 
     @Test
     void tupleStringUInt8_roundTrip() throws Exception {
-        var original = new TupleStringUInt8Handler.SpikeTuple("hello", (short) 255);
+        var original = new TupleStringUInt8Handler.StringUInt8Tuple("hello", (short) 255);
         var handler = new TupleStringUInt8Handler();
-        var result = roundTrip("spike_b_tuple_str_uint8",
+        var result = roundTrip("th_tuple_str_uint8",
                 "Tuple(String, UInt8)", handler, original);
         assertThat(result).isEqualTo(original);
     }
@@ -240,7 +240,7 @@ class SpikeB_TypeRoundTripIT {
                 valueToName, nameToValue);
 
         String original = "GREEN";
-        String result = roundTrip("spike_b_enum8",
+        String result = roundTrip("th_enum8",
                 "Enum8('RED' = -1, 'GREEN' = 0, 'BLUE' = 1)", handler, original);
         assertThat(result).isEqualTo(original);
     }
@@ -248,7 +248,7 @@ class SpikeB_TypeRoundTripIT {
     @Test
     void ipv6_roundTrip() throws Exception {
         Inet6Address original = (Inet6Address) InetAddress.getByName("2001:db8::1");
-        Inet6Address result = roundTrip("spike_b_ipv6", "IPv6", new IPv6Handler(), original);
+        Inet6Address result = roundTrip("th_ipv6", "IPv6", new IPv6Handler(), original);
         assertThat(result).isEqualTo(original);
     }
 
@@ -256,7 +256,7 @@ class SpikeB_TypeRoundTripIT {
     void uuid_roundTrip() throws Exception {
         // This specific value will catch any byte-swapping bugs silently
         UUID original = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
-        UUID result = roundTrip("spike_b_uuid", "UUID", new UuidHandler(), original);
+        UUID result = roundTrip("th_uuid", "UUID", new UuidHandler(), original);
         assertThat(result).isEqualTo(original);
     }
 

@@ -3,7 +3,7 @@ package io.blinkhouse.benchmark;
 import java.util.UUID;
 
 /**
- * Immutable record matching the {@code bh_spike_a} benchmark table schema.
+ * Immutable record matching the {@code bh_transport_benchmark} table schema.
  *
  * <p>Column mapping:
  * <pre>
@@ -14,4 +14,4 @@ import java.util.UUID;
  *   duration_ms UInt32              → durationMs int
  * </pre>
  */
-public record SpikeARow(int tenantId, long tsMillis, UUID userId, String country, int durationMs) {}
+public record TransportBenchmarkRow(int tenantId, long tsMillis, UUID userId, String country, int durationMs) {}

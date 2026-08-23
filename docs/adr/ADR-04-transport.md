@@ -3,7 +3,7 @@
 **Status:** Accepted  
 **Date:** 2026-08-23  
 **Deciders:** BlinkHouse core team  
-**Spike:** `SpikeABenchmark` — `blinkhouse-benchmark/src/main/java/io/blinkhouse/benchmark/SpikeABenchmark.java`
+**Benchmark:** `TransportBenchmark` — `blinkhouse-benchmark/src/main/java/io/blinkhouse/benchmark/TransportBenchmark.java`
 
 ---
 
@@ -120,7 +120,7 @@ Rejected. ~430k rows/sec is well below NFR-1. Text encoding per row, per-row obj
 
 ## References
 
-- `blinkhouse-benchmark/src/main/java/io/blinkhouse/benchmark/SpikeABenchmark.java` — benchmark source
-- `spike-a-results.json` — raw JMH output (root of repo after benchmark run)
+- `blinkhouse-benchmark/src/main/java/io/blinkhouse/benchmark/TransportBenchmark.java` — benchmark source
+- `transport-benchmark-results.json` — raw JMH output (root of repo after benchmark run)
 - `03-HLD.md §7` — ADR-03 (RowBinary block serialisation for writes)
 - `01-REQUIREMENTS.md` — NFR-1, NFR-2, Q-1

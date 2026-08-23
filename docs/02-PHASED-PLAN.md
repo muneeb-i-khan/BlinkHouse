@@ -37,13 +37,13 @@ Both are given because most OSS projects of this kind are built part-time.
 ## Phase 0 — Foundations & Spike
 **Goal:** Prove the riskiest technical assumptions before writing framework code.
 **Duration:** 2 FT-weeks · **No release**
-**Status:** In progress (2/4 spikes done)
+**Status:** In progress (3/4 spikes done — CI scaffolding remaining)
 
 ### Build
 - [ ] Repo scaffolding: multi-module build, CI (GitHub Actions), Testcontainers harness, code style, license headers, `CONTRIBUTING.md`.
 - [x] **Spike A — Transport bake-off.** Insert 100k rows and scan via (a) `clickhouse-jdbc`, (b) `client-v2`, (c) HTTP + `RowBinary`. Results: ~2.9M rows/s (raw HTTP) vs ~600k (client-v2) vs ~430k (JDBC). *Resolves Q-1.* → See `docs/adr/ADR-04-transport.md`.
 - [x] **Spike B — Type round-trip.** 12 hardest types implemented in `ChOutputStream`/`ChInputStream` + 12 `TypeHandler` impls. 12/13 tests pass; JSON skipped (internal binary format, not simple LEB128 — documented in test). *Resolves Q-4.*
-- [ ] **Spike C — Spring Data SPI.** Minimal `RepositoryFactoryBean` returning a hardcoded result. *Resolves Q-5.*
+- [x] **Spike C — Spring Data SPI.** `@EnableClickHouseRepositories`, `ClickHouseRepositoryFactoryBean`, `ClickHouseRepositoryFactory`, `SimpleClickHouseRepository`. Fragment composition (`PageViewRepositoryImpl`) dispatched correctly through the proxy. 3/3 tests pass. *Resolves Q-5.*
 - [ ] JMH benchmark module wired into CI (baseline numbers recorded, NFR-1/NFR-2 gates defined).
 
 ### Exit criteria
@@ -51,6 +51,10 @@ Both are given because most OSS projects of this kind are built part-time.
 - [x] All 12 hard types round-trip correctly (or known-unsupported list documented). JSON skipped with documented reason.
 - [x] ADR log established (`/docs/adr/`).
 - [ ] CI green, container-based integration tests running in under 5 minutes.
+
+### Resolved questions
+- **Q-1 (Transport):** Split transport — raw HTTP + RowBinary for writes, client-v2 for reads. See `docs/adr/ADR-04-transport.md`.
+- **Q-5 (Spring Data SPI):** Depend on `spring-data-commons`. `RepositoryFactoryBean` SPI is viable; fragment composition works end-to-end.
 
 ### Decision: Split transport (from ADR-04)
 Raw HTTP + RowBinary for writes (BatchWriter), client-v2 for reads (ChTemplate). JDBC retained as optional compatibility escape hatch only. NFR-1 baseline locked at ≥ 2.6M rows/sec.
