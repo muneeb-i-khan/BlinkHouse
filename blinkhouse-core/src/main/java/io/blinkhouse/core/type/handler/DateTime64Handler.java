@@ -87,7 +87,9 @@ public final class DateTime64Handler implements TypeHandler<Instant> {
 
     private static long pow10(int exp) {
         long result = 1;
-        for (int i = 0; i < exp; i++) result *= 10;
+        for (int i = 0; i < exp; i++) {
+            result *= 10;
+        }
         return result;
     }
 }

@@ -43,10 +43,10 @@ public final class MapStringArrayUInt32Handler implements TypeHandler<Map<String
             out.writeULeb128(arr.size());
             for (long v : arr) {
                 // Write as 4 bytes LE (UInt32)
-                out.writeByte((int)(v & 0xFF));
-                out.writeByte((int)((v >> 8) & 0xFF));
-                out.writeByte((int)((v >> 16) & 0xFF));
-                out.writeByte((int)((v >> 24) & 0xFF));
+                out.writeByte((int) (v & 0xFF));
+                out.writeByte((int) ((v >> 8) & 0xFF));
+                out.writeByte((int) ((v >> 16) & 0xFF));
+                out.writeByte((int) ((v >> 24) & 0xFF));
             }
         }
     }

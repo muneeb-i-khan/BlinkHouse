@@ -21,7 +21,7 @@ public final class TupleStringUInt8Handler implements TypeHandler<TupleStringUIn
      * @param u the UInt8 element — stored as {@code short} to avoid sign-extension
      *          (UInt8 range is [0, 255] which overflows Java's signed {@code byte})
      */
-    public record StringUInt8Tuple(String s, short u) {}
+    public record StringUInt8Tuple(String s, short u) { }
 
     @Override
     public String clickHouseTypeName() {
@@ -37,7 +37,7 @@ public final class TupleStringUInt8Handler implements TypeHandler<TupleStringUIn
     @Override
     public StringUInt8Tuple read(ChInputStream in) throws IOException {
         String s = in.readString();
-        short u = (short)(in.readByte() & 0xFF);
+        short u = (short) (in.readByte() & 0xFF);
         return new StringUInt8Tuple(s, u);
     }
 }
