@@ -103,9 +103,12 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-
       - name: Install parent + core
         run: mvn -B install -pl .,blinkhouse-core -DskipTests -Dcheckstyle.skip=true
+        env:
+          MAVEN_OPTS: "-Dmaven.wagon.httpconnectionManager.ttlSeconds=25 -Dmaven.wagon.http.retryHandler.count=3"
 
       - name: Compile benchmark module
         run: mvn -B compile -pl blinkhouse-benchmark -Dcheckstyle.skip=true
+        env:
+          MAVEN_OPTS: "-Dmaven.wagon.httpconnectionManager.ttlSeconds=25 -Dmaven.wagon.http.retryHandler.count=3"
