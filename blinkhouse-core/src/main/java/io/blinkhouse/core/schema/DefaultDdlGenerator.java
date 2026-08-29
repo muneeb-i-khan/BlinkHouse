@@ -1,9 +1,13 @@
 package io.blinkhouse.core.schema;
 
+import io.blinkhouse.core.annotation.ChDictionary;
 import io.blinkhouse.core.annotation.Engine;
 import io.blinkhouse.core.metadata.ColumnMetadata;
+import io.blinkhouse.core.metadata.DictionaryAttributeMetadata;
+import io.blinkhouse.core.metadata.DictionaryMetadata;
 import io.blinkhouse.core.metadata.EngineMetadata;
 import io.blinkhouse.core.metadata.EntityMetadata;
+import io.blinkhouse.core.metadata.MaterializedViewMetadata;
 import io.blinkhouse.core.metadata.SkipIndexMetadata;
 import java.util.ArrayList;
 import java.util.List;
@@ -120,6 +124,128 @@ public final class DefaultDdlGenerator implements DdlGenerator {
             }
         }
         return stmts;
+    }
+
+    @Override
+    public String createMaterializedView(MaterializedViewMetadata mv, boolean ifNotExists) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("CREATE MATERIALIZED VIEW ");
+        if (ifNotExists) {
+            sb.append("IF NOT EXISTS ");
+        }
+        sb.append(mv.getQualifiedName());
+        mv.getOnCluster().ifPresent(c -> sb.append(" ON CLUSTER `").append(c).append('`'));
+
+        if (!mv.getTargetTable().isEmpty()) {
+            sb.append(" TO ").append(mv.getTargetTable());
+        }
+
+        if (mv.isPopulate()) {
+            sb.append(" POPULATE");
+        }
+
+        sb.append(" AS\n").append(mv.getSelectSql());
+        return sb.toString().strip();
+    }
+
+    @Override
+    public String createDictionary(DictionaryMetadata dict, boolean ifNotExists) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("CREATE DICTIONARY ");
+        if (ifNotExists) {
+            sb.append("IF NOT EXISTS ");
+        }
+        sb.append(dict.getQualifiedName());
+        dict.getOnCluster().ifPresent(c -> sb.append(" ON CLUSTER `").append(c).append('`'));
+        sb.append("\n(\n");
+
+        List<DictionaryAttributeMetadata> keys = new ArrayList<>();
+        List<DictionaryAttributeMetadata> attrs = new ArrayList<>();
+        for (DictionaryAttributeMetadata a : dict.getAttributes()) {
+            if (a.isKey()) {
+                keys.add(a);
+            } else {
+                attrs.add(a);
+            }
+        }
+
+        // Key section
+        boolean complexKey = keys.size() > 1
+                || dict.getLayout() == ChDictionary.Layout.COMPLEX_KEY_HASHED
+                || dict.getLayout() == ChDictionary.Layout.COMPLEX_KEY_CACHE;
+        if (complexKey) {
+            for (DictionaryAttributeMetadata k : keys) {
+                sb.append("    `").append(k.getName()).append("` ").append(k.getChTypeName()).append(",\n");
+            }
+        } else if (!keys.isEmpty()) {
+            DictionaryAttributeMetadata k = keys.get(0);
+            sb.append("    `").append(k.getName()).append("` ").append(k.getChTypeName()).append(",\n");
+        }
+
+        for (int i = 0; i < attrs.size(); i++) {
+            DictionaryAttributeMetadata a = attrs.get(i);
+            sb.append("    `").append(a.getName()).append("` ").append(a.getChTypeName());
+            if (!a.getNullValue().isEmpty()) {
+                sb.append(" DEFAULT '").append(escapeString(a.getNullValue())).append("'");
+            }
+            if (i < attrs.size() - 1) {
+                sb.append(",");
+            }
+            sb.append("\n");
+        }
+        sb.append(")\n");
+
+        // PRIMARY KEY
+        if (complexKey) {
+            sb.append("PRIMARY KEY ");
+            List<String> keyNames = new ArrayList<>();
+            for (DictionaryAttributeMetadata k : keys) {
+                keyNames.add("`" + k.getName() + "`");
+            }
+            sb.append(String.join(", ", keyNames)).append("\n");
+        } else if (!keys.isEmpty()) {
+            sb.append("PRIMARY KEY `").append(keys.get(0).getName()).append("`\n");
+        }
+
+        // SOURCE
+        sb.append("SOURCE(").append(renderDictSource(dict)).append(")\n");
+
+        // LAYOUT
+        sb.append("LAYOUT(").append(dict.getLayout().name()).append("())\n");
+
+        // LIFETIME
+        if (dict.getLifetimeMin() == dict.getLifetimeMax()) {
+            sb.append("LIFETIME(").append(dict.getLifetimeMin()).append(")");
+        } else {
+            sb.append("LIFETIME(MIN ").append(dict.getLifetimeMin())
+              .append(" MAX ").append(dict.getLifetimeMax()).append(")");
+        }
+
+        return sb.toString().strip();
+    }
+
+    private String renderDictSource(DictionaryMetadata dict) {
+        switch (dict.getSourceType()) {
+            case CLICKHOUSE: {
+                StringBuilder s = new StringBuilder("CLICKHOUSE(TABLE '");
+                s.append(escapeString(dict.getSourceTable())).append("'");
+                if (!dict.getSourceWhere().isEmpty()) {
+                    s.append(" WHERE '").append(escapeString(dict.getSourceWhere())).append("'");
+                }
+                s.append(")");
+                return s.toString();
+            }
+            case MYSQL:
+                return "MYSQL(TABLE '" + escapeString(dict.getSourceTable()) + "')";
+            case POSTGRESQL:
+                return "POSTGRESQL(TABLE '" + escapeString(dict.getSourceTable()) + "')";
+            case HTTP:
+                return "HTTP(URL '" + escapeString(dict.getSourceTable()) + "' FORMAT TSV)";
+            case FILE:
+                return "FILE(PATH '" + escapeString(dict.getSourceTable()) + "' FORMAT TSV)";
+            default:
+                return "CLICKHOUSE(TABLE '" + escapeString(dict.getSourceTable()) + "')";
+        }
     }
 
     private String renderEngine(EngineMetadata em, EntityMetadata<?> entity) {

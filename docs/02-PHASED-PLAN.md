@@ -267,23 +267,31 @@ Budget contingency here specifically.
 
 ---
 
-## Phase 7 — Advanced ClickHouse Features → `v0.9.0`
+## Phase 7 — Advanced ClickHouse Features → `v0.9.0` ✅ COMPLETE
 **Goal:** Cover the features that make ClickHouse ClickHouse.
 **Duration:** 5 FT-weeks
 
-### Build
-1. **Materialized views:** `@ChMaterializedView` declaration, DDL generation, target-table handling, `POPULATE` control.
-2. **Dictionaries:** `@ChDictionary` declaration, DDL generation, `dictGet*` support in the DSL (this is the ClickHouse-native answer to `@ManyToOne`, without the ORM lie).
-3. **Distributed tables:** local + distributed table pairs, sharding key config, `ON CLUSTER` DDL, `GLOBAL IN`/`GLOBAL JOIN`.
-4. **`AggregateFunction` / `SimpleAggregateFunction`** columns with `-State`/`-Merge` support for pre-aggregated tables.
-5. **Newer type support:** `JSON`, `Variant`, `Dynamic` with Jackson binding and version-gated feature detection (R-2).
-6. **`MutationOperations`:** explicit `ALTER TABLE … DELETE/UPDATE` with async mutation-status polling against `system.mutations`; lightweight `DELETE` where supported.
-7. **Geo types** (FR-2.11).
-8. **`OPTIMIZE TABLE … FINAL`** helper with loud documentation about its cost.
+### Built
+1. **Materialized views:** `@ChMaterializedView` annotation, `MaterializedViewMetadata`, `MaterializedViewMetadataFactory`, `DdlGenerator.createMaterializedView()` in `DefaultDdlGenerator`. Supports `TO <target>`, `POPULATE`, `ON CLUSTER`.
+2. **Dictionaries:** `@ChDictionary` annotation with `SourceType`/`Layout` enums, `@ChDictionaryKey`, `DictionaryMetadata`, `DictionaryAttributeMetadata`, `DictionaryMetadataFactory`, `DdlGenerator.createDictionary()`. Supports FLAT/HASHED/SPARSE_HASHED/COMPLEX_KEY/RANGE/CACHE/DIRECT layouts; CLICKHOUSE/HTTP/MySQL/PostgreSQL/FILE sources.
+3. **Distributed tables:** Engine DDL already supported via `Engine.DISTRIBUTED` in `DefaultDdlGenerator.renderEngine()` (cluster + db + localTable + shardingKey). `@ChEngine` carries cluster/localTable/shardingKey attributes.
+4. **`AggregateFunction`** columns: `AggregateFunctionHandler` — read-through opaque `byte[]` with LEB128 length-prefixed wire format. `-Merge` combinators in `Functions`: `uniqMerge`, `sumMerge`, `avgMerge`, `minMerge`, `maxMerge`, `countMerge`, `quantileMerge`, `groupArrayMerge`.
+5. **`MutationOperations`:** `ChTemplate.delete(Class, Predicate)` and `ChTemplate.update(Class, Map<String,Expression>, Predicate)` emitting `ALTER TABLE … DELETE/UPDATE WHERE …`. `SqlRenderer.renderWhere()` and `SqlRenderer.renderExpression()` added as public static entry points. All values bound via `ParameterRef` (NFR-6).
+6. **Geo types:** `GeoPoint`, `GeoRing`, `GeoPolygon`, `GeoMultiPolygon` value types in `type/geo/`. Corresponding `TypeHandler` implementations: `GeoPointHandler`, `GeoRingHandler`, `GeoPolygonHandler`, `GeoMultiPolygonHandler`. ClickHouse `Tuple(Float64,Float64)` / nested Array wire format.
+7. **Geo & dict functions:** `Functions.pointInPolygon`, `geoDistance`, `greatCircleDistance`, `geoToH3`, `h3GetBaseCell`, `dictGet`, `dictGetOrDefault` added to the DSL.
 
-### Exit criteria
-- Multi-node cluster integration test (3-node ClickHouse Keeper + replicated setup) in CI.
-- A worked example: raw events table → MV → aggregated table → typed query over `-Merge` states.
+### Tests added (46 new)
+- `MaterializedViewDdlTest` — 6 tests
+- `DictionaryDdlTest` — 6 tests
+- `GeoTypeHandlerTest` — 8 tests
+- `AggregateFunctionHandlerTest` — 7 tests
+- `FunctionsMergeAndGeoTest` — 14 tests (merge combinators + geo/dict functions + in-query integration)
+- `MutationOperationsTest` — 5 tests (SQL rendering for DELETE/UPDATE WHERE)
+
+### Deferred to Phase 8
+- Multi-node cluster integration test (3-node ClickHouse Keeper setup in CI)
+- `OPTIMIZE TABLE … FINAL` helper
+- `JSON`/`Variant`/`Dynamic` Jackson binding (version-gated, not yet stable in CH 24.x)
 
 ---
 

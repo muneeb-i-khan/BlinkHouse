@@ -55,6 +55,34 @@ public final class SqlRenderer {
         return new BoundStatement(sql, r.params);
     }
 
+    /**
+     * Renders a predicate expression into a bound SQL fragment.
+     *
+     * <p>Useful for building mutation clauses ({@code ALTER TABLE … DELETE WHERE …}).
+     *
+     * @param predicate the predicate to render
+     * @return a BoundStatement containing the WHERE fragment and collected parameters
+     */
+    public static BoundStatement renderWhere(Predicate predicate) {
+        SqlRenderer r = new SqlRenderer();
+        String sql = r.renderExpr(predicate);
+        return new BoundStatement(sql, r.params);
+    }
+
+    /**
+     * Renders a single expression into a bound SQL fragment.
+     *
+     * <p>Useful for building mutation {@code SET} clauses.
+     *
+     * @param expression the expression to render
+     * @return a BoundStatement containing the expression fragment and collected parameters
+     */
+    public static BoundStatement renderExpression(Expression expression) {
+        SqlRenderer r = new SqlRenderer();
+        String sql = r.renderExpr(expression);
+        return new BoundStatement(sql, r.params);
+    }
+
     // ── SELECT ─────────────────────────────────────────────────────────────────
 
     private String renderSelect(SelectStatement s) {
