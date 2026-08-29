@@ -37,6 +37,12 @@ public class BlinkHouseProperties {
     /** Default database. */
     private String database = "default";
 
+    /**
+     * Application name embedded in {@code query_id} for {@code system.query_log} correlation.
+     * Defaults to {@code "app"} if unset.
+     */
+    private String appName;
+
     /** Query-level settings. */
     private final QueryProperties query = new QueryProperties();
 
@@ -87,6 +93,16 @@ public class BlinkHouseProperties {
     /** @param database the database name */
     public void setDatabase(String database) {
         this.database = database;
+    }
+
+    /** @return the application name used in query IDs */
+    public String getAppName() {
+        return appName;
+    }
+
+    /** @param appName the application name */
+    public void setAppName(String appName) {
+        this.appName = appName;
     }
 
     /** @return the query properties */
