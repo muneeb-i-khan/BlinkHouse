@@ -414,21 +414,58 @@ public interface ChOperations {
     <T> BatchWriter<T> batchWriter(Class<T> type, BatchWriterConfig cfg);
 }
 
-public final class ChTemplate implements ChOperations {
-    public static Builder builder();
+public final class ChTemplate implements ChOperations, Closeable {
+    public static Builder builder(String baseUrl);   // baseUrl includes credentials
     public static final class Builder {
-        Builder url(String url);
-        Builder credentials(String user, String password);
-        Builder database(String db);
-        Builder connectionProvider(ChConnectionProvider p);
-        Builder typeRegistry(TypeRegistry r);
-        Builder options(ChClientOptions o);
+        Builder registry(TypeRegistry r);
         Builder metrics(ChMetrics m);
         Builder tracer(ChTracer t);
+        Builder queryIdGenerator(QueryIdGenerator g);
+        /** Override the connection pool (default: ChConnectionPoolConfig.defaults()). */
+        Builder pool(ChConnectionPoolConfig poolConfig);
         ChTemplate build();
     }
+    /** Closes the shared Apache HC5 connection pool. Spring calls this on context shutdown. */
+    @Override void close() throws IOException;
+    /** Force-merge MergeTree family table: OPTIMIZE TABLE … FINAL [ON CLUSTER]. */
+    <T> void optimize(Class<T> entityClass, boolean onCluster) throws ChException;
 }
 ```
+
+### 7.1 Connection pool — `ChConnectionPoolConfig` + `ChHttpClientFactory`
+
+```java
+public final class ChConnectionPoolConfig {
+    // immutable value object; construct via builder()
+    int maxTotal();              // default 200
+    int maxPerRoute();           // default 50
+    Duration connectTimeout();   // default 5s
+    Duration socketTimeout();    // default 60s (generous for OPTIMIZE TABLE)
+    Duration idleEvictAfter();   // default 30s
+    Duration evictorInterval();  // default 5s (set to ZERO to disable evictor thread)
+    Duration validateAfterInactivity(); // default 10s
+
+    static ChConnectionPoolConfig defaults();
+    static Builder builder();
+}
+
+// Factory — do not call the PoolingHttpClientConnectionManager 4-arg constructor directly;
+// use the builder to get proper socket-factory registration.
+public final class ChHttpClientFactory {
+    public static CloseableHttpClient create(ChConnectionPoolConfig config);
+}
+```
+
+**Pool sharing model:** `ChTemplate` owns one `CloseableHttpClient`. `batchWriter()` passes
+that same client to each `BatchWriter` — no per-writer pool allocation. The 3-arg convenience
+constructor on `BatchWriter` creates its own pool (for standalone/test use only).
+
+**Lifecycle:** `ChTemplate.close()` → `http.close()` → pool shutdown. In Spring Boot the bean
+implements `Closeable`, so the context calls `close()` automatically on shutdown.
+
+**Error tunneling:** Apache HC5's response-handler lambda only allows `IOException`. ClickHouse
+HTTP errors (status ≥ 400) are wrapped as `IOException("__ch_error__:status:body")` and
+unwrapped by `rethrowChException()` back into the typed `ChException` hierarchy.
 
 **Execution pipeline** (one method, `executeQuery`, used by every read path):
 

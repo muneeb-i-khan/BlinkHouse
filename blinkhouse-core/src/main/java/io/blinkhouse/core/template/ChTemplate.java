@@ -1,5 +1,7 @@
 package io.blinkhouse.core.template;
 
+import io.blinkhouse.core.connection.ChConnectionPoolConfig;
+import io.blinkhouse.core.connection.ChHttpClientFactory;
 import io.blinkhouse.core.exception.ChException;
 import io.blinkhouse.core.exception.ChExceptionTranslator;
 import io.blinkhouse.core.mapping.RowMapper;
@@ -19,14 +21,10 @@ import io.blinkhouse.core.write.BatchWriterConfig;
 import io.blinkhouse.core.write.RowBinaryWriter;
 
 import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.IOException;
-import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -36,6 +34,12 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 
+import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.classic.methods.HttpPost;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,20 +47,25 @@ import org.slf4j.LoggerFactory;
  * Central execution facade for ClickHouse operations.
  *
  * <p>Thread-safe and stateless with respect to query execution.
- * Use the {@link Builder} to construct instances.
+ * Backed by an Apache HttpClient 5 connection pool for production-grade
+ * connection management. Use the {@link Builder} to construct instances.
+ *
+ * <p>Implements {@link Closeable} — always call {@link #close()} (or use
+ * try-with-resources) when the template is no longer needed so that pooled
+ * connections and the eviction thread are released.
  *
  * <p>Observability is pluggable via {@link ChMetrics}, {@link ChTracer}, and
  * {@link QueryIdGenerator}. Defaults to no-op implementations so that
  * {@code blinkhouse-core} has zero Micrometer/OTel dependencies.
  */
-public final class ChTemplate {
+public final class ChTemplate implements Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(ChTemplate.class);
     private static final long WARN_INTERVAL_NANOS = 60_000_000_000L;
 
     private final String baseUrl;
     private final EntityMetadataFactory metadataFactory;
-    private final HttpClient http;
+    private final CloseableHttpClient http;
     private final ChMetrics metrics;
     private final ChTracer tracer;
     private final QueryIdGenerator queryIdGenerator;
@@ -66,9 +75,7 @@ public final class ChTemplate {
     private ChTemplate(Builder builder) {
         this.baseUrl = builder.baseUrl;
         this.metadataFactory = new EntityMetadataFactory(builder.registry);
-        this.http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
+        this.http = ChHttpClientFactory.create(builder.poolConfig);
         this.metrics = builder.metrics;
         this.tracer = builder.tracer;
         this.queryIdGenerator = builder.queryIdGenerator;
@@ -165,6 +172,8 @@ public final class ChTemplate {
     /**
      * Creates a {@link BatchWriter} for the given entity class using the supplied config.
      *
+     * <p>The batch writer shares this template's connection pool.
+     *
      * @param <T>         the entity type
      * @param entityClass the entity class
      * @param config      batch writer configuration
@@ -172,7 +181,7 @@ public final class ChTemplate {
      */
     public <T> BatchWriter<T> batchWriter(Class<T> entityClass, BatchWriterConfig config) {
         EntityMetadata<T> md = metadataFactory.resolve(entityClass);
-        return new BatchWriter<>(md, config, baseUrl, metrics);
+        return new BatchWriter<>(md, config, baseUrl, http, metrics);
     }
 
     /**
@@ -191,7 +200,6 @@ public final class ChTemplate {
      *
      * <p>Supports entity classes (mapped via {@link EntityMetadataFactory}) and simple
      * scalar types: {@link Long}, {@link Integer}, {@link String}, {@link Double}.
-     * The response is parsed from ClickHouse's default TSV output format.
      *
      * @param <T>         the result element type
      * @param resultType  the class to map each row to
@@ -223,63 +231,25 @@ public final class ChTemplate {
         String url = baseUrl
                 + "&query=" + URLEncoder.encode(sql, StandardCharsets.UTF_8)
                 + "&query_id=" + URLEncoder.encode(queryId, StandardCharsets.UTF_8);
-        HttpRequest req = HttpRequest.newBuilder()
-            .uri(URI.create(url))
-            .GET()
-            .build();
-
-        HttpResponse<String> resp;
+        HttpGet req = new HttpGet(url);
         try {
-            resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ChException("HTTP send interrupted", e);
+            return http.execute(req, response -> {
+                String body = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                if (response.getCode() >= 400) {
+                    throw new IOException(
+                        "__ch_error__:" + response.getCode() + ":" + body);
+                }
+                return parseTsvResponse(body, resultType);
+            });
         } catch (IOException e) {
-            throw ChExceptionTranslator.translateNetworkError(e);
+            rethrowChException(e);
+            throw new ChException("unreachable", e);
         }
-
-        if (resp.statusCode() >= 400) {
-            throw ChExceptionTranslator.translate(resp.body(), resp.statusCode());
-        }
-
-        return parseTsvResponse(resp.body(), resultType);
-    }
-
-    @SuppressWarnings("unchecked")
-    private <T> List<T> parseTsvResponse(String body, Class<T> resultType) {
-        List<T> results = new ArrayList<>();
-        if (body == null || body.isBlank()) {
-            return results;
-        }
-        String[] lines = body.split("\n");
-        for (String line : lines) {
-            if (line.isBlank()) {
-                continue;
-            }
-            String trimmed = line.trim();
-            if (resultType == Long.class || resultType == long.class) {
-                results.add((T) Long.valueOf(trimmed));
-            } else if (resultType == Integer.class || resultType == int.class) {
-                results.add((T) Integer.valueOf(trimmed));
-            } else if (resultType == Double.class || resultType == double.class) {
-                results.add((T) Double.valueOf(trimmed));
-            } else if (resultType == String.class) {
-                results.add((T) trimmed);
-            } else {
-                throw new io.blinkhouse.core.exception.ChMappingException(
-                    "queryForList does not support mapping to " + resultType.getName()
-                    + ". For entity types use a @Query that returns TSV-compatible scalars.");
-            }
-        }
-        return results;
     }
 
     /**
      * Executes a typed query built from a {@link SelectStatement}
      * and maps each result row via the supplied {@link RowMapper}.
-     *
-     * <p>The statement is rendered to parameterised SQL; parameters are appended as
-     * ClickHouse query-string settings ({@code &param_name=value}).
      *
      * @param <T>       the result element type
      * @param statement the SELECT statement to execute
@@ -290,7 +260,6 @@ public final class ChTemplate {
     public <T> List<T> query(SelectStatement statement, RowMapper<T> mapper) throws ChException {
         BoundStatement bound = SqlRenderer.render(statement);
         String queryId = queryIdGenerator.generate();
-        // SQL in spans is parameterised — values never attached (NFR-6)
         Object span = tracer.startSpan("ch.select", bound.sql(), queryId);
         long start = System.currentTimeMillis();
         String table = statement.from() != null ? statement.from().qualifiedName() : "unknown";
@@ -322,67 +291,34 @@ public final class ChTemplate {
                             entry.getValue() == null ? "" : entry.getValue().toString(),
                             StandardCharsets.UTF_8));
         }
-
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(urlBuilder.toString()))
-                .GET()
-                .build();
-
-        HttpResponse<String> resp;
+        HttpGet req = new HttpGet(urlBuilder.toString());
         try {
-            resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ChException("HTTP send interrupted", e);
+            return http.execute(req, response -> {
+                String body = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                if (response.getCode() >= 400) {
+                    throw new IOException("__ch_error__:" + response.getCode() + ":" + body);
+                }
+                try {
+                    return parseTsvWithHeadersResponse(body, mapper);
+                } catch (ChException ce) {
+                    throw new IOException("__ch_mapping__:" + ce.getMessage(), ce);
+                }
+            });
         } catch (IOException e) {
-            throw ChExceptionTranslator.translateNetworkError(e);
+            rethrowChException(e);
+            throw new ChException("unreachable", e);
         }
-
-        if (resp.statusCode() >= 400) {
-            throw ChExceptionTranslator.translate(resp.body(), resp.statusCode());
-        }
-
-        return parseTsvWithHeadersResponse(resp.body(), mapper);
-    }
-
-    private <T> List<T> parseTsvWithHeadersResponse(String body, RowMapper<T> mapper)
-            throws ChException {
-        List<T> results = new ArrayList<>();
-        if (body == null || body.isBlank()) {
-            return results;
-        }
-        String[] lines = body.split("\n");
-        if (lines.length < 2) {
-            return results;
-        }
-        String[] headers = lines[0].split("\t", -1);
-        for (int i = 1; i < lines.length; i++) {
-            if (lines[i].isBlank()) {
-                continue;
-            }
-            String[] cols = lines[i].split("\t", -1);
-            Map<String, String> row = new LinkedHashMap<>();
-            for (int c = 0; c < headers.length; c++) {
-                row.put(headers[c], c < cols.length ? cols[c] : "");
-            }
-            results.add(mapper.mapRow(row));
-        }
-        return results;
     }
 
     /**
      * Executes {@code ALTER TABLE … DELETE WHERE …} for the given entity class.
      *
      * <p>ClickHouse mutations are asynchronous — this method returns as soon as the
-     * server accepts the mutation, not when it completes. Monitor completion via
-     * {@code system.mutations} using the returned mutation ID or poll the table.
-     *
-     * <p>IMPORTANT: ClickHouse mutations rewrite entire parts and are heavy operations.
-     * Prefer designing schemas so rows can be filtered in queries rather than deleted.
+     * server accepts the mutation, not when it completes.
      *
      * @param <T>         the entity type
      * @param entityClass the entity class
-     * @param where       the WHERE predicate (must not be null — use {@code Literal.TRUE} to delete all)
+     * @param where       the WHERE predicate (must not be null)
      * @throws ChException on ClickHouse error
      */
     public <T> void delete(Class<T> entityClass, io.blinkhouse.core.query.ast.Predicate where)
@@ -408,17 +344,13 @@ public final class ChTemplate {
     }
 
     /**
-     * Executes {@code ALTER TABLE … UPDATE col = expr, … WHERE …} for the given entity class.
-     *
-     * <p>Like {@link #delete}, the mutation is asynchronous. Column expressions must not
-     * contain user-supplied raw SQL — use the {@link io.blinkhouse.core.query.ast.ParameterRef}
-     * and AST node types to build expressions safely (NFR-6).
+     * Executes {@code ALTER TABLE … UPDATE col = expr, … WHERE …}.
      *
      * @param <T>         the entity type
      * @param entityClass the entity class
-     * @param assignments a map of ClickHouse column name → the new value expression
-     * @param where       the WHERE predicate (must not be null)
-     * @throws ChException on ClickHouse error or empty assignments map
+     * @param assignments column name → value expression
+     * @param where       the WHERE predicate
+     * @throws ChException on ClickHouse error
      */
     public <T> void update(Class<T> entityClass,
                            java.util.Map<String, io.blinkhouse.core.query.ast.Expression> assignments,
@@ -429,7 +361,6 @@ public final class ChTemplate {
         EntityMetadata<T> md = metadataFactory.resolve(entityClass);
         String table = md.getQualifiedName();
 
-        // Render each assignment expression, accumulating all parameters
         java.util.Map<String, Object> allParams = new java.util.LinkedHashMap<>();
         StringBuilder setClause = new StringBuilder();
         int idx = 0;
@@ -464,51 +395,11 @@ public final class ChTemplate {
                 System.currentTimeMillis() - start);
     }
 
-    private void executeMutation(String sql, BoundStatement bound, String queryId)
-            throws ChException {
-        StringBuilder urlBuilder = new StringBuilder(baseUrl)
-                .append("&query=")
-                .append(java.net.URLEncoder.encode(sql, StandardCharsets.UTF_8))
-                .append("&query_id=")
-                .append(java.net.URLEncoder.encode(queryId, StandardCharsets.UTF_8));
-        for (Map.Entry<String, Object> entry : bound.parameters().entrySet()) {
-            urlBuilder.append("&param_").append(entry.getKey()).append('=')
-                    .append(java.net.URLEncoder.encode(
-                            entry.getValue() == null ? "" : entry.getValue().toString(),
-                            StandardCharsets.UTF_8));
-        }
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(urlBuilder.toString()))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
-        HttpResponse<String> resp;
-        try {
-            resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ChException("HTTP send interrupted", e);
-        } catch (IOException e) {
-            throw ChExceptionTranslator.translateNetworkError(e);
-        }
-        if (resp.statusCode() >= 400) {
-            throw ChExceptionTranslator.translate(resp.body(), resp.statusCode());
-        }
-    }
-
     /**
      * Runs {@code OPTIMIZE TABLE … FINAL} to force a synchronous merge of all parts.
      *
-     * <p>Use after bulk imports into {@code ReplacingMergeTree} or
-     * {@code AggregatingMergeTree} tables to ensure deduplication and aggregation
-     * are applied before querying. This is a blocking HTTP call — ClickHouse holds
-     * the connection until the merge completes or times out.
-     *
-     * <p>In a distributed cluster, pass {@code onCluster = true} to issue the
-     * command on every shard.
-     *
      * @param entityClass the entity class whose table should be optimized
-     * @param onCluster   whether to append {@code ON CLUSTER} (requires a cluster name
-     *                    in the ClickHouse config; not meaningful on single-node setups)
+     * @param onCluster   whether to append {@code ON CLUSTER}
      * @throws ChException on ClickHouse error
      */
     public <T> void optimize(Class<T> entityClass, boolean onCluster) throws ChException {
@@ -537,6 +428,22 @@ public final class ChTemplate {
     }
 
     /**
+     * Closes this template and releases all pooled connections.
+     *
+     * <p>Must be called when the template is no longer needed.
+     * In a Spring Boot application this is handled automatically by the
+     * auto-configuration registering the template as a managed bean.
+     */
+    @Override
+    public void close() {
+        try {
+            http.close();
+        } catch (IOException e) {
+            LOG.warn("Error closing HTTP connection pool", e);
+        }
+    }
+
+    /**
      * Returns the base HTTP URL this template connects to.
      *
      * @return the base URL
@@ -552,6 +459,37 @@ public final class ChTemplate {
      */
     public ChMetrics getMetrics() {
         return metrics;
+    }
+
+    // -----------------------------------------------------------------------
+    // Private helpers
+    // -----------------------------------------------------------------------
+
+    private void executeMutation(String sql, BoundStatement bound, String queryId)
+            throws ChException {
+        StringBuilder urlBuilder = new StringBuilder(baseUrl)
+                .append("&query=")
+                .append(URLEncoder.encode(sql, StandardCharsets.UTF_8))
+                .append("&query_id=")
+                .append(URLEncoder.encode(queryId, StandardCharsets.UTF_8));
+        for (Map.Entry<String, Object> entry : bound.parameters().entrySet()) {
+            urlBuilder.append("&param_").append(entry.getKey()).append('=')
+                    .append(URLEncoder.encode(
+                            entry.getValue() == null ? "" : entry.getValue().toString(),
+                            StandardCharsets.UTF_8));
+        }
+        HttpPost req = new HttpPost(urlBuilder.toString());
+        try {
+            http.execute(req, response -> {
+                String body = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                if (response.getCode() >= 400) {
+                    throw new IOException("__ch_error__:" + response.getCode() + ":" + body);
+                }
+                return null;
+            });
+        } catch (IOException e) {
+            rethrowChException(e);
+        }
     }
 
     private <T> void sendInsert(EntityMetadata<T> md, Collection<T> rows, String queryId)
@@ -571,26 +509,105 @@ public final class ChTemplate {
                 + "&query_id=" + URLEncoder.encode(queryId, StandardCharsets.UTF_8);
         byte[] body = buf.toByteArray();
 
-        HttpRequest req = HttpRequest.newBuilder()
-            .uri(URI.create(url))
-            .header("Content-Type", "application/octet-stream")
-            .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-            .build();
-
-        HttpResponse<String> resp;
+        HttpPost req = new HttpPost(url);
+        req.setEntity(new ByteArrayEntity(body, ContentType.APPLICATION_OCTET_STREAM));
         try {
-            resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ChException("HTTP send interrupted", e);
+            http.execute(req, response -> {
+                String respBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                if (response.getCode() >= 400) {
+                    throw new IOException("__ch_error__:" + response.getCode() + ":" + respBody);
+                }
+                return null;
+            });
         } catch (IOException e) {
-            throw ChExceptionTranslator.translateNetworkError(e);
-        }
-
-        if (resp.statusCode() >= 400) {
-            throw ChExceptionTranslator.translate(resp.body(), resp.statusCode());
+            rethrowChException(e);
         }
     }
+
+    /**
+     * Unwraps the sentinel {@code __ch_error__} convention used to tunnel
+     * ClickHouse HTTP errors through the Apache HC5 response handler lambda,
+     * then re-throws as the appropriate {@link ChException} subtype.
+     */
+    private static void rethrowChException(IOException e) throws ChException {
+        String msg = e.getMessage();
+        if (msg != null && msg.startsWith("__ch_error__:")) {
+            String[] parts = msg.split(":", 3);
+            int statusCode = parts.length > 1 ? parseIntSafe(parts[1]) : 500;
+            String body = parts.length > 2 ? parts[2] : "";
+            throw ChExceptionTranslator.translate(body, statusCode);
+        }
+        if (msg != null && msg.startsWith("__ch_mapping__:")) {
+            throw new io.blinkhouse.core.exception.ChMappingException(
+                msg.substring("__ch_mapping__:".length()));
+        }
+        throw ChExceptionTranslator.translateNetworkError(e);
+    }
+
+    private static int parseIntSafe(String s) {
+        try {
+            return Integer.parseInt(s.trim());
+        } catch (NumberFormatException ex) {
+            return 500;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> List<T> parseTsvResponse(String body, Class<T> resultType) {
+        List<T> results = new ArrayList<>();
+        if (body == null || body.isBlank()) {
+            return results;
+        }
+        for (String line : body.split("\n")) {
+            if (line.isBlank()) {
+                continue;
+            }
+            String trimmed = line.trim();
+            if (resultType == Long.class || resultType == long.class) {
+                results.add((T) Long.valueOf(trimmed));
+            } else if (resultType == Integer.class || resultType == int.class) {
+                results.add((T) Integer.valueOf(trimmed));
+            } else if (resultType == Double.class || resultType == double.class) {
+                results.add((T) Double.valueOf(trimmed));
+            } else if (resultType == String.class) {
+                results.add((T) trimmed);
+            } else {
+                throw new io.blinkhouse.core.exception.ChMappingException(
+                    "queryForList does not support mapping to " + resultType.getName()
+                    + ". For entity types use a @Query that returns TSV-compatible scalars.");
+            }
+        }
+        return results;
+    }
+
+    private <T> List<T> parseTsvWithHeadersResponse(String body, RowMapper<T> mapper)
+            throws ChException {
+        List<T> results = new ArrayList<>();
+        if (body == null || body.isBlank()) {
+            return results;
+        }
+        String[] lines = body.split("\n");
+        if (lines.length < 2) {
+            return results;
+        }
+        String[] headers = lines[0].split("\t", -1);
+        for (int i = 1; i < lines.length; i++) {
+            if (lines[i].isBlank()) {
+                continue;
+            }
+            String[] cols = lines[i].split("\t", -1);
+            Map<String, String> row = new LinkedHashMap<>();
+            for (int c = 0; c < headers.length; c++) {
+                row.put(headers[c], c < cols.length ? cols[c] : "");
+            }
+            results.add(mapper.mapRow(row));
+        }
+        return results;
+    }
+
+    // -----------------------------------------------------------------------
+    // Builder
+    // -----------------------------------------------------------------------
 
     /**
      * Builder for {@link ChTemplate}.
@@ -606,6 +623,7 @@ public final class ChTemplate {
         private ChMetrics metrics = NoopChMetrics.INSTANCE;
         private ChTracer tracer = NoopChTracer.INSTANCE;
         private QueryIdGenerator queryIdGenerator = new QueryIdGenerator();
+        private ChConnectionPoolConfig poolConfig = ChConnectionPoolConfig.defaults();
 
         private Builder(String baseUrl) {
             this.baseUrl = baseUrl;
@@ -613,7 +631,6 @@ public final class ChTemplate {
 
         /**
          * Sets the ClickHouse HTTP base URL (scheme + host + port, no credentials).
-         * Use with {@link #credentials} and {@link #database} for fluent URL composition.
          *
          * @param url the base URL, e.g. {@code http://localhost:8123}
          * @return this builder
@@ -650,7 +667,7 @@ public final class ChTemplate {
         /**
          * Sets the type registry. Defaults to {@link TypeRegistry#withDefaults()}.
          *
-         * @param registry the type registry to use
+         * @param registry the type registry
          * @return this builder
          */
         public Builder registry(TypeRegistry registry) {
@@ -688,6 +705,19 @@ public final class ChTemplate {
          */
         public Builder queryIdGenerator(QueryIdGenerator generator) {
             this.queryIdGenerator = generator != null ? generator : new QueryIdGenerator();
+            return this;
+        }
+
+        /**
+         * Configures the HTTP connection pool.
+         * Defaults to {@link ChConnectionPoolConfig#defaults()} (200 max total,
+         * 50 per route, 5s connect, 60s socket, 30s idle eviction).
+         *
+         * @param poolConfig the pool configuration
+         * @return this builder
+         */
+        public Builder pool(ChConnectionPoolConfig poolConfig) {
+            this.poolConfig = poolConfig != null ? poolConfig : ChConnectionPoolConfig.defaults();
             return this;
         }
 

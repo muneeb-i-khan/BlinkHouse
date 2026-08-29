@@ -20,6 +20,14 @@ import java.time.Duration;
  *     mode: VALIDATE
  *   batch:
  *     max-rows: 100000
+ *   pool:
+ *     max-total: 200
+ *     max-per-route: 50
+ *     connect-timeout: 5s
+ *     socket-timeout: 60s
+ *     idle-evict-after: 30s
+ *     evictor-interval: 5s
+ *     validate-after-inactivity: 10s
  * }</pre>
  */
 @ConfigurationProperties(prefix = "clickhouse")
@@ -54,6 +62,9 @@ public class BlinkHouseProperties {
 
     /** Observability settings. */
     private final MetricsProperties metrics = new MetricsProperties();
+
+    /** HTTP connection pool settings. */
+    private final ConnectionPoolProperties pool = new ConnectionPoolProperties();
 
     /** @return the ClickHouse HTTP URL */
     public String getUrl() {
@@ -331,6 +342,115 @@ public class BlinkHouseProperties {
         /** @param tracingEnabled the flag */
         public void setTracingEnabled(boolean tracingEnabled) {
             this.tracingEnabled = tracingEnabled;
+        }
+    }
+
+    /** @return the connection pool properties */
+    public ConnectionPoolProperties getPool() {
+        return pool;
+    }
+
+    /** HTTP connection pool configuration. */
+    public static class ConnectionPoolProperties {
+
+        /** Total maximum connections across all routes. */
+        private int maxTotal = 200;
+
+        /** Maximum connections per ClickHouse host. */
+        private int maxPerRoute = 50;
+
+        /** TCP connect timeout. */
+        private Duration connectTimeout = Duration.ofSeconds(5);
+
+        /**
+         * Socket read/write timeout.
+         * Set generously to accommodate long-running OPTIMIZE TABLE calls.
+         */
+        private Duration socketTimeout = Duration.ofSeconds(60);
+
+        /** Connections idle for longer than this are eligible for eviction. */
+        private Duration idleEvictAfter = Duration.ofSeconds(30);
+
+        /**
+         * Period between background idle-connection eviction sweeps.
+         * Set to zero to disable the eviction thread.
+         */
+        private Duration evictorInterval = Duration.ofSeconds(5);
+
+        /**
+         * Connections inactive for longer than this are validated before being leased
+         * (avoids half-open socket errors on long-lived keep-alive connections).
+         */
+        private Duration validateAfterInactivity = Duration.ofSeconds(10);
+
+        /** @return total max connections */
+        public int getMaxTotal() {
+            return maxTotal;
+        }
+
+        /** @param maxTotal total max connections */
+        public void setMaxTotal(int maxTotal) {
+            this.maxTotal = maxTotal;
+        }
+
+        /** @return max connections per route */
+        public int getMaxPerRoute() {
+            return maxPerRoute;
+        }
+
+        /** @param maxPerRoute max connections per route */
+        public void setMaxPerRoute(int maxPerRoute) {
+            this.maxPerRoute = maxPerRoute;
+        }
+
+        /** @return TCP connect timeout */
+        public Duration getConnectTimeout() {
+            return connectTimeout;
+        }
+
+        /** @param connectTimeout TCP connect timeout */
+        public void setConnectTimeout(Duration connectTimeout) {
+            this.connectTimeout = connectTimeout;
+        }
+
+        /** @return socket read/write timeout */
+        public Duration getSocketTimeout() {
+            return socketTimeout;
+        }
+
+        /** @param socketTimeout socket read/write timeout */
+        public void setSocketTimeout(Duration socketTimeout) {
+            this.socketTimeout = socketTimeout;
+        }
+
+        /** @return idle eviction threshold */
+        public Duration getIdleEvictAfter() {
+            return idleEvictAfter;
+        }
+
+        /** @param idleEvictAfter idle eviction threshold */
+        public void setIdleEvictAfter(Duration idleEvictAfter) {
+            this.idleEvictAfter = idleEvictAfter;
+        }
+
+        /** @return eviction thread interval */
+        public Duration getEvictorInterval() {
+            return evictorInterval;
+        }
+
+        /** @param evictorInterval eviction thread interval */
+        public void setEvictorInterval(Duration evictorInterval) {
+            this.evictorInterval = evictorInterval;
+        }
+
+        /** @return inactivity period before connection validation */
+        public Duration getValidateAfterInactivity() {
+            return validateAfterInactivity;
+        }
+
+        /** @param validateAfterInactivity inactivity period */
+        public void setValidateAfterInactivity(Duration validateAfterInactivity) {
+            this.validateAfterInactivity = validateAfterInactivity;
         }
     }
 }

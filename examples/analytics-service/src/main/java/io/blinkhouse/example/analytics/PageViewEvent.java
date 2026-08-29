@@ -16,8 +16,8 @@ import java.util.UUID;
  * Call {@code ChTemplate.optimize(PageViewEvent.class, false)} after bulk
  * imports to force immediate deduplication.
  */
-@ChTable(name = "page_view_events", database = "analytics")
-@ChEngine(value = Engine.ReplacingMergeTree, orderBy = {"session_id", "path", "ts"})
+@ChTable(name = "page_view_events", database = "analytics", orderBy = {"session_id", "path", "ts"})
+@ChEngine(value = Engine.REPLACING_MERGE_TREE)
 public class PageViewEvent {
 
     @ChColumn(name = "event_id")
