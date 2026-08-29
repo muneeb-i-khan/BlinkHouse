@@ -23,6 +23,7 @@
         <jmh.version>1.37</jmh.version>
         <!-- Skip deploying this module -->
         <maven.deploy.skip>true</maven.deploy.skip>
+        <central.publishing.skip>true</central.publishing.skip>
     </properties>
 
     <dependencies>

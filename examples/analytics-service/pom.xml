@@ -22,6 +22,7 @@
 
     <properties>
         <maven.deploy.skip>true</maven.deploy.skip>
+        <central.publishing.skip>true</central.publishing.skip>
         <!-- Skip checkstyle for the example app — it's demo code, not library code -->
         <checkstyle.skip>true</checkstyle.skip>
     </properties>
