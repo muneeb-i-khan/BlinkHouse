@@ -9,6 +9,14 @@ blinkhouse:
   database: analytics
   schema:
     mode: CREATE_IF_MISSING
+  pool:
+    max-total: 200
+    max-per-route: 50
+    connect-timeout: 5s
+    socket-timeout: 60s
+    idle-evict-after: 30s
+    evictor-interval: 5s
+    validate-after-inactivity: 10s
 
 management:
   endpoints:

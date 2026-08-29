@@ -311,8 +311,9 @@ Budget contingency here specifically.
 8. **Reference analytics service:** `examples/analytics-service/` — `PageViewEvent` entity, Spring Boot application, `application.yml`, Spring Boot Maven plugin.
 9. **"Coming from JPA" guide:** `docs/05-COMING-FROM-JPA.md` — mapping tables for entities, repositories, writes, reads, transactions, schema, and what BlinkHouse deliberately does not do.
 10. **Community files:** `CODEOWNERS`, `.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/feature_request.md`, `CHANGELOG.md`.
+11. **Production-grade connection pooling (post-Phase-8 hardening):** Apache HttpClient 5 replaces the bare JDK `HttpClient`. `ChConnectionPoolConfig` value object, `ChHttpClientFactory` builds a `PoolingHttpClientConnectionManager`-backed client. One pool is shared between `ChTemplate` and all its `BatchWriter` instances. `ChTemplate` now implements `Closeable` (Spring shuts it down automatically). Pool tunable via `clickhouse.pool.*` in `application.yml`. 8 new unit tests (`ChConnectionPoolConfigTest`).
 
-### Test count: 124 unit + 29 ITs (1 skipped — `VariantTypeHandler` pending CH 24.8+ feature)
+### Test count: 132 unit + 29 ITs (1 skipped — `VariantTypeHandler` pending CH 24.8+ feature)
 
 ### Exit criteria
 All v1.0 success criteria from `01-REQUIREMENTS.md` §9 met.

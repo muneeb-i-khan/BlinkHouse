@@ -98,8 +98,8 @@ clickorm/
 ├───────────────────────────────────────────────────────────────┤
 │ L1  Protocol      RowBinary codec · parameter binding         │
 ├───────────────────────────────────────────────────────────────┤
-│ L0  Transport     ChConnectionProvider (native / JDBC / HTTP) │
-└───────────────────────────────────────────────────────────────┘
+│ L0  Transport     Apache HttpClient 5 pooled client (HTTP + RowBinary) │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 Each layer depends only downward. L5 is entirely optional sugar — a user can call L4
@@ -246,7 +246,7 @@ SchemaMode?
 | `ChTemplate` | Stateless, thread-safe, shared singleton. |
 | Metadata cache | Immutable after startup; lock-free reads. |
 | `TypeRegistry` | Copy-on-write; mutation only during initialisation. |
-| Connection pool | Bounded, fair acquisition, configurable timeout; borrow-return with leak detection. |
+| Connection pool | Apache HttpClient 5 `PoolingHttpClientConnectionManager`. One pool per `ChTemplate` (shared with all `BatchWriter` children). Background evictor removes idle/half-open connections. `ChTemplate` implements `Closeable`; Spring releases the pool on context shutdown. |
 | `BatchWriter` | MPSC ring buffer (many producers, dedicated flusher pool). Flusher count configurable; ordering guaranteed *within* a batch, not across batches. |
 | Streaming reads | Cursor bound to a borrowed connection; must be closed. Leak detector logs unclosed streams. |
 
@@ -290,8 +290,13 @@ clickorm:
   transport: native            # native | jdbc | http
   compression: lz4
   pool:
-    max-size: 20
-    acquire-timeout: 5s
+    max-total: 200          # total connections across all routes (default: 200)
+    max-per-route: 50       # connections per ClickHouse host (default: 50)
+    connect-timeout: 5s     # TCP connect timeout (default: 5s)
+    socket-timeout: 60s     # read/write timeout — set high for OPTIMIZE (default: 60s)
+    idle-evict-after: 30s   # evict connections idle longer than this (default: 30s)
+    evictor-interval: 5s    # background eviction sweep interval; 0 to disable (default: 5s)
+    validate-after-inactivity: 10s  # re-validate before leasing stale conn (default: 10s)
   query:
     default-timeout: 30s
     settings:

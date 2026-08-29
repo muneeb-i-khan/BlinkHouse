@@ -20,6 +20,14 @@ import java.time.Duration;
  *     mode: VALIDATE
  *   batch:
  *     max-rows: 100000
+ *   pool:
+ *     max-total: 200
+ *     max-per-route: 50
+ *     connect-timeout: 5s
+ *     socket-timeout: 60s
+ *     idle-evict-after: 30s
+ *     evictor-interval: 5s
+ *     validate-after-inactivity: 10s
  * }</pre>
  */
 @ConfigurationProperties(prefix = "clickhouse")

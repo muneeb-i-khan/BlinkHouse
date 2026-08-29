@@ -18,6 +18,7 @@ First stable release. API freeze on all types not in `*.internal.*` packages.
 - **Spring Boot Starter**: `@BlinkHouseTest` slice, `BlinkHouseAutoConfiguration`, `BlinkHouseProperties`, Spring Data repository support
 - **Observability**: `ChMetrics`/`ChTracer` SPI, Micrometer & OTel implementations, `QueryIdGenerator`, Grafana dashboard, runbook
 - **Advanced features**: `@ChMaterializedView`, `@ChDictionary`, `AggregateFunctionHandler`, `-Merge` SQL combinators, `MutationOperations` (`ALTER TABLE … DELETE/UPDATE`), geo types (`GeoPoint`, `GeoRing`, `GeoPolygon`, `GeoMultiPolygon`)
+- **Connection pooling**: Apache HttpClient 5 (`httpclient5` 5.4.1) connection pool replacing the bare JDK `HttpClient`. `ChConnectionPoolConfig` value object (maxTotal=200, maxPerRoute=50, connectTimeout=5s, socketTimeout=60s, idle eviction, inactivity validation). `ChHttpClientFactory` builds a `PoolingHttpClientConnectionManager`-backed `CloseableHttpClient` shared across `ChTemplate` and all its `BatchWriter` children. `ChTemplate` now implements `Closeable`. Pool fully configurable via `clickhouse.pool.*` YAML namespace. 8 new unit tests.
 - **Hardening**: `@BlinkHouseApi`/`@Internal` stability annotations, `ChTemplate.optimize()` (`OPTIMIZE TABLE … FINAL`), GraalVM native-image hints, ArchUnit API-stability and layering rules, SQL injection audit tests
 - **CI**: Java 17 × 21 matrix, ClickHouse 24.3 / 24.8 / 25.1 matrix, benchmark compile check
 - **Community**: `CODEOWNERS`, issue templates, `CHANGELOG`
