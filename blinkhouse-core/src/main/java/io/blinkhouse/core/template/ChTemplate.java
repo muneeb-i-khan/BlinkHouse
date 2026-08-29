@@ -50,13 +50,22 @@ public final class ChTemplate {
     }
 
     /**
-     * Creates a new {@link Builder}.
+     * Creates a new {@link Builder} pre-seeded with the full base URL.
      *
      * @param baseUrl the ClickHouse HTTP base URL, including credentials query parameters
      * @return a new builder
      */
     public static Builder builder(String baseUrl) {
         return new Builder(baseUrl);
+    }
+
+    /**
+     * Creates a new {@link Builder} for composing the URL from individual parts.
+     *
+     * @return a new builder
+     */
+    public static Builder builder() {
+        return new Builder(null);
     }
 
     /**
@@ -185,11 +194,51 @@ public final class ChTemplate {
      */
     public static final class Builder {
 
-        private final String baseUrl;
+        private String baseUrl;
+        private String urlBase;
+        private String user;
+        private String password;
+        private String database;
         private TypeRegistry registry = TypeRegistry.withDefaults();
 
         private Builder(String baseUrl) {
             this.baseUrl = baseUrl;
+        }
+
+        /**
+         * Sets the ClickHouse HTTP base URL (scheme + host + port, no credentials).
+         * Use with {@link #credentials} and {@link #database} for fluent URL composition.
+         *
+         * @param url the base URL, e.g. {@code http://localhost:8123}
+         * @return this builder
+         */
+        public Builder url(String url) {
+            this.urlBase = url;
+            return this;
+        }
+
+        /**
+         * Sets the ClickHouse credentials for URL composition.
+         *
+         * @param user     username
+         * @param password password
+         * @return this builder
+         */
+        public Builder credentials(String user, String password) {
+            this.user = user;
+            this.password = password;
+            return this;
+        }
+
+        /**
+         * Sets the ClickHouse database for URL composition.
+         *
+         * @param database the database name
+         * @return this builder
+         */
+        public Builder database(String database) {
+            this.database = database;
+            return this;
         }
 
         /**
@@ -209,6 +258,27 @@ public final class ChTemplate {
          * @return a new, thread-safe template instance
          */
         public ChTemplate build() {
+            if (baseUrl == null) {
+                if (urlBase == null) {
+                    throw new IllegalStateException("Either builder(baseUrl) or url() must be set");
+                }
+                StringBuilder sb = new StringBuilder(urlBase).append("/?");
+                if (user != null) {
+                    sb.append("user=").append(user).append("&");
+                }
+                if (password != null) {
+                    sb.append("password=").append(password).append("&");
+                }
+                if (database != null) {
+                    sb.append("database=").append(database).append("&");
+                }
+                // trim trailing '&' or '?'
+                String composed = sb.toString();
+                if (composed.endsWith("&") || composed.endsWith("?")) {
+                    composed = composed.substring(0, composed.length() - 1);
+                }
+                baseUrl = composed;
+            }
             return new ChTemplate(this);
         }
     }
