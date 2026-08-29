@@ -6,7 +6,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>io.blinkhouse</groupId>
+        <groupId>io.github.muneeb-i-khan</groupId>
         <artifactId>blinkhouse-parent</artifactId>
         <version>1.0.0</version>
     </parent>

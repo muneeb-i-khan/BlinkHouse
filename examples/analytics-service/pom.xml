@@ -6,7 +6,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>io.blinkhouse</groupId>
+        <groupId>io.github.muneeb-i-khan</groupId>
         <artifactId>blinkhouse-examples</artifactId>
         <version>1.0.0</version>
     </parent>
@@ -29,7 +29,7 @@
     <dependencies>
         <!-- BlinkHouse Spring Boot Starter — brings in core + spring + autoconfigure -->
         <dependency>
-            <groupId>io.blinkhouse</groupId>
+            <groupId>io.github.muneeb-i-khan</groupId>
             <artifactId>blinkhouse-spring-boot-starter</artifactId>
         </dependency>
 
@@ -53,7 +53,7 @@
 
         <!-- Test slice -->
         <dependency>
-            <groupId>io.blinkhouse</groupId>
+            <groupId>io.github.muneeb-i-khan</groupId>
             <artifactId>blinkhouse-test</artifactId>
             <scope>test</scope>
         </dependency>

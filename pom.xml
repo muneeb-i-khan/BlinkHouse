@@ -5,14 +5,14 @@
                              https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>io.blinkhouse</groupId>
+    <groupId>io.github.muneeb-i-khan</groupId>
     <artifactId>blinkhouse-parent</artifactId>
     <version>1.0.0</version>
     <packaging>pom</packaging>
 
     <name>BlinkHouse :: Parent</name>
     <description>ClickHouse-native persistence framework for Java and Spring Boot</description>
-    <url>https://github.com/muneebillahi/blinkhouse</url>
+    <url>https://github.com/muneeb-i-khan/BlinkHouse</url>
 
     <licenses>
         <license>
@@ -21,6 +21,33 @@
             <distribution>repo</distribution>
         </license>
     </licenses>
+
+    <developers>
+        <developer>
+            <id>muneeb-i-khan</id>
+            <name>Muneeb Illahi</name>
+            <email>omni.wms@increff.com</email>
+            <url>https://github.com/muneeb-i-khan</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/muneeb-i-khan/BlinkHouse.git</connection>
+        <developerConnection>scm:git:https://github.com/muneeb-i-khan/BlinkHouse.git</developerConnection>
+        <url>https://github.com/muneeb-i-khan/BlinkHouse</url>
+        <tag>v1.0.0</tag>
+    </scm>
+
+    <distributionManagement>
+        <snapshotRepository>
+            <id>ossrh</id>
+            <url>https://s01.oss.sonatype.org/content/repositories/snapshots</url>
+        </snapshotRepository>
+        <repository>
+            <id>ossrh</id>
+            <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+        </repository>
+    </distributionManagement>
 
     <modules>
         <module>blinkhouse-core</module>
@@ -54,6 +81,8 @@
         <maven-javadoc-plugin.version>3.10.1</maven-javadoc-plugin.version>
         <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
         <maven-checkstyle-plugin.version>3.5.0</maven-checkstyle-plugin.version>
+        <maven-gpg-plugin.version>3.2.7</maven-gpg-plugin.version>
+        <central-publishing-maven-plugin.version>0.6.0</central-publishing-maven-plugin.version>
         <checkstyle.version>10.18.2</checkstyle.version>
         <checkstyle.config>${maven.multiModuleProjectDirectory}/config/checkstyle.xml</checkstyle.config>
         <checkstyle.suppressions>${maven.multiModuleProjectDirectory}/config/checkstyle-suppressions.xml</checkstyle.suppressions>
@@ -63,27 +92,27 @@
         <dependencies>
             <!-- Internal modules -->
             <dependency>
-                <groupId>io.blinkhouse</groupId>
+                <groupId>io.github.muneeb-i-khan</groupId>
                 <artifactId>blinkhouse-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.blinkhouse</groupId>
+                <groupId>io.github.muneeb-i-khan</groupId>
                 <artifactId>blinkhouse-processor</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.blinkhouse</groupId>
+                <groupId>io.github.muneeb-i-khan</groupId>
                 <artifactId>blinkhouse-spring</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.blinkhouse</groupId>
+                <groupId>io.github.muneeb-i-khan</groupId>
                 <artifactId>blinkhouse-spring-boot-starter</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.blinkhouse</groupId>
+                <groupId>io.github.muneeb-i-khan</groupId>
                 <artifactId>blinkhouse-test</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -303,4 +332,81 @@
         </pluginManagement>
 
     </build>
+
+    <!--
+        Release profile — activated with: mvn deploy -P release
+        Requires ~/.m2/settings.xml to contain an <server id="ossrh"> entry with
+        your Sonatype credentials, and a GPG key available to the agent.
+    -->
+    <profiles>
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <!-- Attach sources JAR -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>${maven-source-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals><goal>jar-no-fork</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Attach Javadoc JAR -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>${maven-javadoc-plugin.version}</version>
+                        <configuration>
+                            <doclint>none</doclint>
+                            <quiet>true</quiet>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals><goal>jar</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- GPG-sign all artifacts -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>${maven-gpg-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals><goal>sign</goal></goals>
+                                <configuration>
+                                    <!-- Key fingerprint or UID; falls back to default key if unset -->
+                                    <keyname>${gpg.keyname}</keyname>
+                                    <passphraseServerId>${gpg.keyname}</passphraseServerId>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Publish to Maven Central via the Central Publishing portal -->
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>${central-publishing-maven-plugin.version}</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>ossrh</publishingServerId>
+                            <autoPublish>false</autoPublish>
+                            <!-- Set to true to publish immediately without manual review -->
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
 </project>
