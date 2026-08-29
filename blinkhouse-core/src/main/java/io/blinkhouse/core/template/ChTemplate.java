@@ -146,6 +146,73 @@ public final class ChTemplate {
     }
 
     /**
+     * Executes a raw SELECT SQL and returns the results as a list of the given type.
+     *
+     * <p>Supports entity classes (mapped via {@link EntityMetadataFactory}) and simple
+     * scalar types: {@link Long}, {@link Integer}, {@link String}, {@link Double}.
+     * The response is parsed from ClickHouse's default TSV output format.
+     *
+     * @param <T>         the result element type
+     * @param resultType  the class to map each row to
+     * @param sql         the raw ClickHouse SQL to execute
+     * @return list of results, never {@code null}
+     * @throws ChException on ClickHouse error or mapping failure
+     */
+    public <T> java.util.List<T> queryForList(Class<T> resultType, String sql)
+            throws ChException {
+        String url = baseUrl + "&query=" + java.net.URLEncoder.encode(sql, StandardCharsets.UTF_8);
+        HttpRequest req = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .GET()
+            .build();
+
+        HttpResponse<String> resp;
+        try {
+            resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ChException("HTTP send interrupted", e);
+        } catch (IOException e) {
+            throw ChExceptionTranslator.translateNetworkError(e);
+        }
+
+        if (resp.statusCode() >= 400) {
+            throw ChExceptionTranslator.translate(resp.body(), resp.statusCode());
+        }
+
+        return parseTsvResponse(resp.body(), resultType);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> java.util.List<T> parseTsvResponse(String body, Class<T> resultType) {
+        java.util.List<T> results = new java.util.ArrayList<>();
+        if (body == null || body.isBlank()) {
+            return results;
+        }
+        String[] lines = body.split("\n");
+        for (String line : lines) {
+            if (line.isBlank()) {
+                continue;
+            }
+            String trimmed = line.trim();
+            if (resultType == Long.class || resultType == long.class) {
+                results.add((T) Long.valueOf(trimmed));
+            } else if (resultType == Integer.class || resultType == int.class) {
+                results.add((T) Integer.valueOf(trimmed));
+            } else if (resultType == Double.class || resultType == double.class) {
+                results.add((T) Double.valueOf(trimmed));
+            } else if (resultType == String.class) {
+                results.add((T) trimmed);
+            } else {
+                throw new io.blinkhouse.core.exception.ChMappingException(
+                    "queryForList does not support mapping to " + resultType.getName()
+                    + ". For entity types use a @Query that returns TSV-compatible scalars.");
+            }
+        }
+        return results;
+    }
+
+    /**
      * Returns the base HTTP URL this template connects to.
      *
      * @return the base URL

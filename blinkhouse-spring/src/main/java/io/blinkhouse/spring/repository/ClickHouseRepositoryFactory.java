@@ -1,5 +1,8 @@
 package io.blinkhouse.spring.repository;
 
+import io.blinkhouse.core.metadata.EntityMetadataFactory;
+import io.blinkhouse.core.template.ChTemplate;
+import io.blinkhouse.core.type.TypeRegistry;
 import org.springframework.data.repository.core.EntityInformation;
 import org.springframework.data.repository.core.RepositoryInformation;
 import org.springframework.data.repository.core.RepositoryMetadata;
@@ -13,23 +16,49 @@ import java.util.Optional;
  * Spring Data factory that creates repository proxies backed by
  * {@link SimpleClickHouseRepository}.
  *
- * <p>Spike C scope: every repository interface gets a
- * {@link SimpleClickHouseRepository} as its base implementation. No query
- * derivation, no method execution — just proof that the Spring Data SPI wires
- * correctly and that user-defined methods on the interface can be invoked via
- * the proxy.
+ * <p>When a {@link ChTemplate} is provided, derived query methods are resolved
+ * through {@link ChQueryLookupStrategy}. Without a template (e.g. in Spike C tests)
+ * the factory falls back to no query lookup strategy, which allows only custom
+ * fragment methods.
  */
 public class ClickHouseRepositoryFactory extends RepositoryFactorySupport {
+
+    private final ChTemplate template;
+    private final EntityMetadataFactory metadataFactory;
+
+    /**
+     * Constructs a factory backed by the given template.
+     *
+     * @param template the ChTemplate for query execution; may be {@code null} for stub mode
+     */
+    public ClickHouseRepositoryFactory(ChTemplate template) {
+        this.template = template;
+        this.metadataFactory = template != null
+            ? new EntityMetadataFactory(TypeRegistry.withDefaults())
+            : null;
+    }
+
+    /**
+     * Constructs a factory in stub mode (no template, fragment dispatch only).
+     */
+    public ClickHouseRepositoryFactory() {
+        this(null);
+    }
 
     @Override
     @SuppressWarnings("unchecked")
     public <T, ID> EntityInformation<T, ID> getEntityInformation(Class<T> domainClass) {
-        return new SimpleEntityInformation<>(domainClass);
+        return new ChEntityInformation<>(domainClass);
     }
 
     @Override
     protected Object getTargetRepository(RepositoryInformation metadata) {
-        return new SimpleClickHouseRepository<>(metadata.getDomainType());
+        @SuppressWarnings("unchecked")
+        Class<Object> domainType = (Class<Object>) metadata.getDomainType();
+        if (template != null) {
+            return new SimpleClickHouseRepository<>(domainType, template);
+        }
+        return new SimpleClickHouseRepository<>(domainType);
     }
 
     @Override
@@ -41,42 +70,9 @@ public class ClickHouseRepositoryFactory extends RepositoryFactorySupport {
     protected Optional<QueryLookupStrategy> getQueryLookupStrategy(
             QueryLookupStrategy.Key key,
             QueryMethodEvaluationContextProvider evaluationContextProvider) {
-        // No query derivation in Spike C — return empty to let the proxy
-        // handle only the base-class methods.
-        return Optional.empty();
-    }
-
-    /**
-     * Minimal {@link EntityInformation} that carries only the domain class.
-     * ID extraction is unsupported in the spike — ClickHouse entities rarely
-     * have a single-column primary key anyway.
-     */
-    private static class SimpleEntityInformation<T, ID> implements EntityInformation<T, ID> {
-
-        private final Class<T> domainType;
-
-        SimpleEntityInformation(Class<T> domainType) {
-            this.domainType = domainType;
+        if (template == null) {
+            return Optional.empty();
         }
-
-        @Override
-        public boolean isNew(T entity) {
-            return true;
-        }
-
-        @Override
-        public ID getId(T entity) {
-            return null;
-        }
-
-        @Override
-        public Class<ID> getIdType() {
-            throw new UnsupportedOperationException("ID type not supported in Spike C");
-        }
-
-        @Override
-        public Class<T> getJavaType() {
-            return domainType;
-        }
+        return Optional.of(new ChQueryLookupStrategy(template, metadataFactory));
     }
 }
