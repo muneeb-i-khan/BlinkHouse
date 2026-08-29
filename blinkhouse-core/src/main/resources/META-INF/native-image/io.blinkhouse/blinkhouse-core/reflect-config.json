@@ -1,0 +1,178 @@
+[
+  {
+    "name": "io.blinkhouse.core.annotation.ChTable",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.ChColumn",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.ChEngine",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.ChCodec",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.ChSkipIndex",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.ChSkipIndexes",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.ChSetting",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.ChIgnore",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.ChMaterializedView",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.ChDictionary",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.ChDictionaryKey",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.Engine",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.annotation.IndexType",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.metadata.EntityMetadata",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "io.blinkhouse.core.metadata.EntityMetadataFactory",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.metadata.ColumnMetadata",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "io.blinkhouse.core.metadata.EngineMetadata",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.metadata.DictionaryMetadata",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.metadata.DictionaryAttributeMetadata",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.metadata.MaterializedViewMetadata",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.template.ChTemplate",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.template.ChTemplate$Builder",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.write.BatchWriter",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.write.BatchWriterConfig",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.type.TypeRegistry",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.exception.ChException",
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "io.blinkhouse.core.exception.ChConnectionException",
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "io.blinkhouse.core.exception.ChMappingException",
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "io.blinkhouse.core.exception.ChSchemaException",
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "io.blinkhouse.core.exception.ChSyntaxException",
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "io.blinkhouse.core.exception.ChTimeoutException",
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "io.blinkhouse.core.exception.ChMemoryLimitException",
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "io.blinkhouse.core.exception.ChTooManyPartsException",
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "io.blinkhouse.core.observability.NoopChMetrics",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.observability.NoopChTracer",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.type.geo.GeoPoint",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.type.geo.GeoRing",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.type.geo.GeoPolygon",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "io.blinkhouse.core.type.geo.GeoMultiPolygon",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  }
+]

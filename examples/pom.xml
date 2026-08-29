@@ -8,7 +8,7 @@
     <parent>
         <groupId>io.blinkhouse</groupId>
         <artifactId>blinkhouse-parent</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>1.0.0</version>
     </parent>
 
     <artifactId>blinkhouse-examples</artifactId>
@@ -24,8 +24,7 @@
         <maven.deploy.skip>true</maven.deploy.skip>
     </properties>
 
-    <!-- Sub-modules added as the reference app is built (Phase 8) -->
-    <!-- <modules> -->
-    <!--     <module>analytics-service</module> -->
-    <!-- </modules> -->
+    <modules>
+        <module>analytics-service</module>
+    </modules>
 </project>

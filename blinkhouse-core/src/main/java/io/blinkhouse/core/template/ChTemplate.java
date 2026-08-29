@@ -496,6 +496,47 @@ public final class ChTemplate {
     }
 
     /**
+     * Runs {@code OPTIMIZE TABLE … FINAL} to force a synchronous merge of all parts.
+     *
+     * <p>Use after bulk imports into {@code ReplacingMergeTree} or
+     * {@code AggregatingMergeTree} tables to ensure deduplication and aggregation
+     * are applied before querying. This is a blocking HTTP call — ClickHouse holds
+     * the connection until the merge completes or times out.
+     *
+     * <p>In a distributed cluster, pass {@code onCluster = true} to issue the
+     * command on every shard.
+     *
+     * @param entityClass the entity class whose table should be optimized
+     * @param onCluster   whether to append {@code ON CLUSTER} (requires a cluster name
+     *                    in the ClickHouse config; not meaningful on single-node setups)
+     * @throws ChException on ClickHouse error
+     */
+    public <T> void optimize(Class<T> entityClass, boolean onCluster) throws ChException {
+        EntityMetadata<T> md = metadataFactory.resolve(entityClass);
+        String table = md.getQualifiedName();
+        String queryId = queryIdGenerator.generate();
+        StringBuilder sql = new StringBuilder("OPTIMIZE TABLE ").append(table).append(" FINAL");
+        if (onCluster) {
+            sql.append(" ON CLUSTER");
+        }
+        BoundStatement bound = new BoundStatement(sql.toString(), java.util.Collections.emptyMap());
+        long start = System.currentTimeMillis();
+        Object span = tracer.startSpan("ch.optimize", sql.toString(), queryId);
+        ChException caught = null;
+        try {
+            executeMutation(sql.toString(), bound, queryId);
+        } catch (ChException e) {
+            caught = e;
+            throw e;
+        } finally {
+            tracer.endSpan(span, caught);
+            String outcome = caught == null ? "ok" : "error";
+            metrics.recordQuery(table, "optimize", "none", "optimize", outcome,
+                    System.currentTimeMillis() - start);
+        }
+    }
+
+    /**
      * Returns the base HTTP URL this template connects to.
      *
      * @return the base URL

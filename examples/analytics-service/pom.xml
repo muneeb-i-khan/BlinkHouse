@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.blinkhouse</groupId>
+        <artifactId>blinkhouse-examples</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>analytics-service</artifactId>
+    <packaging>jar</packaging>
+    <name>BlinkHouse :: Examples :: Analytics Service</name>
+    <description>
+        Reference analytics application — event ingest + dashboard query API.
+        Demonstrates the full BlinkHouse stack end-to-end with Spring Boot.
+        NOT published to Maven Central.
+    </description>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <!-- Skip checkstyle for the example app — it's demo code, not library code -->
+        <checkstyle.skip>true</checkstyle.skip>
+    </properties>
+
+    <dependencies>
+        <!-- BlinkHouse Spring Boot Starter — brings in core + spring + autoconfigure -->
+        <dependency>
+            <groupId>io.blinkhouse</groupId>
+            <artifactId>blinkhouse-spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- Spring Boot Web for the REST API layer -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- Actuator for health + metrics endpoints -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Micrometer Prometheus registry so BlinkHouse metrics are scrapeable -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- Test slice -->
+        <dependency>
+            <groupId>io.blinkhouse</groupId>
+            <artifactId>blinkhouse-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring-boot.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
