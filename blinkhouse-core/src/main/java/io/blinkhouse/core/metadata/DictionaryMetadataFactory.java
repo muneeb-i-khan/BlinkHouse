@@ -75,14 +75,30 @@ public final class DictionaryMetadataFactory {
             return col.type();
         }
         Class<?> t = field.getType();
-        if (t == long.class || t == Long.class) return "UInt64";
-        if (t == int.class || t == Integer.class) return "UInt32";
-        if (t == short.class || t == Short.class) return "UInt16";
-        if (t == byte.class || t == Byte.class) return "UInt8";
-        if (t == double.class || t == Double.class) return "Float64";
-        if (t == float.class || t == Float.class) return "Float32";
-        if (t == boolean.class || t == Boolean.class) return "UInt8";
-        if (t == java.math.BigDecimal.class) return "Decimal(18, 4)";
+        if (t == long.class || t == Long.class) {
+            return "UInt64";
+        }
+        if (t == int.class || t == Integer.class) {
+            return "UInt32";
+        }
+        if (t == short.class || t == Short.class) {
+            return "UInt16";
+        }
+        if (t == byte.class || t == Byte.class) {
+            return "UInt8";
+        }
+        if (t == double.class || t == Double.class) {
+            return "Float64";
+        }
+        if (t == float.class || t == Float.class) {
+            return "Float32";
+        }
+        if (t == boolean.class || t == Boolean.class) {
+            return "UInt8";
+        }
+        if (t == java.math.BigDecimal.class) {
+            return "Decimal(18, 4)";
+        }
         return "String";
     }
 

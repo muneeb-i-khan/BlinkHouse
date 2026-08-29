@@ -28,8 +28,12 @@ public final class GeoPoint {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof GeoPoint)) return false;
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof GeoPoint)) {
+            return false;
+        }
         GeoPoint that = (GeoPoint) o;
         return Double.compare(longitude, that.longitude) == 0
             && Double.compare(latitude, that.latitude) == 0;

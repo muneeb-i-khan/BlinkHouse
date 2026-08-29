@@ -26,8 +26,12 @@ public final class GeoRing {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof GeoRing)) return false;
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof GeoRing)) {
+            return false;
+        }
         return points.equals(((GeoRing) o).points);
     }
 

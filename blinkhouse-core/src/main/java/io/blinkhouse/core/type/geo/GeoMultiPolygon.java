@@ -25,8 +25,12 @@ public final class GeoMultiPolygon {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof GeoMultiPolygon)) return false;
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof GeoMultiPolygon)) {
+            return false;
+        }
         return polygons.equals(((GeoMultiPolygon) o).polygons);
     }
 
