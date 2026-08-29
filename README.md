@@ -16,6 +16,8 @@ BlinkHouse is a ClickHouse-native persistence library for Java and Spring Boot. 
 
 **It is not an ORM.** ClickHouse has no transactions, no row-level identity, no dirty checking, and no foreign keys. BlinkHouse doesn't fake any of that.
 
+Join the slack workspace for dev discussions, issues or general talks:-  [Slack Community](https://join.slack.com/t/blinkhousecommunity/shared_invite/zt-48crfluhd-udIgb5rD3rz3NYc1OoBgoQ)
+
 ---
 
 ## Install
