@@ -3,61 +3,69 @@ package io.blinkhouse.core.write;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
- * Live statistics snapshot for a single {@link BatchWriter} instance.
+ * Lock-free statistics for a {@link BatchWriter} instance.
  *
- * <p>Counters are updated by flusher threads using {@link LongAdder} for low contention.
- * Call {@link #snapshot()} to read a consistent point-in-time copy.
+ * <p>All counters use {@link LongAdder} for high-throughput concurrent updates.
+ * Call {@link #snapshot()} to read a consistent point-in-time view.
  */
 public final class BatchWriterStats {
 
-    private final LongAdder rowsInserted    = new LongAdder();
-    private final LongAdder rowsDropped     = new LongAdder();
-    private final LongAdder rowsDeadLettered = new LongAdder();
-    private final LongAdder flushCount      = new LongAdder();
-    private final LongAdder retryCount      = new LongAdder();
-    private final LongAdder bytesWritten    = new LongAdder();
+    private final LongAdder insertedRows = new LongAdder();
+    private final LongAdder insertedBytes = new LongAdder();
+    private final LongAdder droppedRows = new LongAdder();
+    private final LongAdder deadLetteredRows = new LongAdder();
+    private final LongAdder retries = new LongAdder();
 
-    /** Point-in-time snapshot of all counters. */
-    public record Snapshot(
-            long rowsInserted,
-            long rowsDropped,
-            long rowsDeadLettered,
-            long flushCount,
-            long retryCount,
-            long bytesWritten
-    ) { }
-
-    /** Records a successful flush of {@code rows} rows and {@code bytes} bytes. */
+    /** Records a successful batch insert. */
     public void recordInserted(long rows, long bytes) {
-        rowsInserted.add(rows);
-        bytesWritten.add(bytes);
-        flushCount.increment();
+        insertedRows.add(rows);
+        insertedBytes.add(bytes);
     }
 
-    /** Records {@code rows} rows silently evicted by DROP_OLDEST backpressure. */
+    /** Records rows dropped due to {@link BackpressurePolicy#DROP_OLDEST}. */
     public void recordDropped(long rows) {
-        rowsDropped.add(rows);
+        droppedRows.add(rows);
     }
 
-    /** Records {@code rows} rows delivered to the dead-letter handler. */
+    /** Records rows sent to the dead-letter handler. */
     public void recordDeadLettered(long rows) {
-        rowsDeadLettered.add(rows);
+        deadLetteredRows.add(rows);
     }
 
-    /** Records one retry attempt. */
+    /** Records a single retry attempt. */
     public void recordRetry() {
-        retryCount.increment();
+        retries.increment();
     }
 
-    /** Returns a consistent point-in-time snapshot. */
+    /**
+     * Returns a point-in-time snapshot of all counters.
+     *
+     * @return an immutable snapshot
+     */
     public Snapshot snapshot() {
         return new Snapshot(
-                rowsInserted.sum(),
-                rowsDropped.sum(),
-                rowsDeadLettered.sum(),
-                flushCount.sum(),
-                retryCount.sum(),
-                bytesWritten.sum()
+            insertedRows.sum(),
+            insertedBytes.sum(),
+            droppedRows.sum(),
+            deadLetteredRows.sum(),
+            retries.sum()
         );
+    }
+
+    /**
+     * Immutable point-in-time view of {@link BatchWriterStats}.
+     *
+     * @param insertedRows      total rows successfully delivered to ClickHouse
+     * @param insertedBytes     total bytes successfully delivered
+     * @param droppedRows       total rows evicted by DROP_OLDEST back-pressure
+     * @param deadLetteredRows  total rows delivered to the failure handler
+     * @param retries           total retry attempts made
+     */
+    public record Snapshot(
+            long insertedRows,
+            long insertedBytes,
+            long droppedRows,
+            long deadLetteredRows,
+            long retries) {
     }
 }

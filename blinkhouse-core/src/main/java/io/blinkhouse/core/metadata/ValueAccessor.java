@@ -1,23 +1,21 @@
 package io.blinkhouse.core.metadata;
 
 /**
- * Extracts the value of one field/component from an entity instance.
+ * Extracts a single column value from an entity instance.
  *
- * <p>Implementations back this with {@link java.lang.invoke.MethodHandle} or
- * {@link java.lang.invoke.LambdaMetafactory} for zero-reflection overhead at
- * call time (Phase 1). The Phase 2 implementation uses a simple reflective
- * accessor that is replaced by the full LambdaMetafactory path in Phase 1.
+ * <p>Implementations are produced by {@link EntityMetadataFactory} using
+ * {@code LambdaMetafactory} or {@code MethodHandle} to avoid reflection in the hot path.
  *
- * @param <T> entity type
+ * @param <T> the entity type
  */
 @FunctionalInterface
 public interface ValueAccessor<T> {
 
     /**
-     * Returns the field value for {@code entity}.
+     * Returns the column value from {@code entity}.
      *
-     * @throws RuntimeException if the underlying accessor fails (should not happen
-     *                          after startup validation)
+     * @param entity the entity instance; must not be {@code null}
+     * @return the column value; may be {@code null} if the column is nullable
      */
     Object get(T entity);
 }

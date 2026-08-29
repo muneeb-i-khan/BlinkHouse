@@ -2,48 +2,57 @@ package io.blinkhouse.core.write;
 
 import io.blinkhouse.core.exception.ChErrorCode;
 import io.blinkhouse.core.exception.ChException;
-
 import java.util.Set;
 
 /**
- * Classifies a {@link ChException} as retryable or terminal so the
- * {@link BatchWriter} flusher can decide whether to retry or dead-letter a batch.
+ * Classifies a {@link ChException} into a retry strategy for the batch writer.
  *
- * <p>Two codes get special treatment — {@code MEMORY_LIMIT_EXCEEDED} (241) and
- * {@code TOO_MANY_PARTS} (252) — because they warrant halving the batch size on
- * retry rather than just backing off with the same payload.
- *
- * <p>All unknown codes default to {@code TERMINAL} (conservative default — see HLD §9
- * and LLD §9.2).
+ * <p>Classification drives the retry loop in {@link BatchWriter}:
+ * <ul>
+ *   <li>{@link Classification#RETRYABLE} — retry with the same batch</li>
+ *   <li>{@link Classification#RETRYABLE_HALVE_BATCH} — retry with half the batch,
+ *       requeue the other half</li>
+ *   <li>{@link Classification#TERMINAL} — send to dead letter; do not retry</li>
+ * </ul>
  */
 public final class ErrorClassifier {
 
-    /** Outcome of classifying a failure. */
+    /** The retry strategy for a given exception. */
     public enum Classification {
-        /** Retry with exponential backoff; keep the same batch size. */
+
+        /** Retry the full batch after a delay. */
         RETRYABLE,
-        /** Retry with exponential backoff AND halve the batch size. */
+
+        /** Retry the first half of the batch; requeue the second half. */
         RETRYABLE_HALVE_BATCH,
-        /** Do not retry; hand batch to the {@link BatchFailureHandler}. */
+
+        /** Do not retry — deliver to the failure handler. */
         TERMINAL
     }
 
-    private static final Set<Integer> RETRYABLE_CODES = Set.of(
-            ChErrorCode.TIMEOUT_EXCEEDED,
-            ChErrorCode.TOO_MANY_SIMULTANEOUS_QUERIES,
-            ChErrorCode.NO_FREE_CONNECTION,
-            ChErrorCode.SOCKET_TIMEOUT,
-            ChErrorCode.NETWORK_ERROR,
-            ChErrorCode.KEEPER_EXCEPTION
-    );
-
     private static final Set<Integer> RETRYABLE_HALVE_CODES = Set.of(
-            ChErrorCode.MEMORY_LIMIT_EXCEEDED,
-            ChErrorCode.TOO_MANY_PARTS
+        ChErrorCode.MEMORY_LIMIT_EXCEEDED,
+        ChErrorCode.TOO_MANY_PARTS
     );
 
-    /** Classifies the given exception. */
-    public Classification classify(ChException ex) {
+    private static final Set<Integer> RETRYABLE_CODES = Set.of(
+        ChErrorCode.TIMEOUT_EXCEEDED,
+        ChErrorCode.TOO_MANY_SIMULTANEOUS_QUERIES,
+        ChErrorCode.NO_FREE_CONNECTION,
+        ChErrorCode.SOCKET_TIMEOUT,
+        ChErrorCode.NETWORK_ERROR,
+        ChErrorCode.KEEPER_EXCEPTION
+    );
+
+    private ErrorClassifier() {}
+
+    /**
+     * Classifies a {@link ChException} for the retry loop.
+     *
+     * @param ex the exception to classify
+     * @return the classification
+     */
+    public static Classification classify(ChException ex) {
         int code = ex.getErrorCode();
         if (RETRYABLE_HALVE_CODES.contains(code)) {
             return Classification.RETRYABLE_HALVE_BATCH;
@@ -52,10 +61,5 @@ public final class ErrorClassifier {
             return Classification.RETRYABLE;
         }
         return Classification.TERMINAL;
-    }
-
-    /** Classifies a raw network/IO exception (always retryable). */
-    public Classification classifyNetworkError() {
-        return Classification.RETRYABLE;
     }
 }

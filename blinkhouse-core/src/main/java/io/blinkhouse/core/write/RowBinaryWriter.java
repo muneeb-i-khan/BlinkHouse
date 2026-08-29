@@ -4,113 +4,104 @@ import io.blinkhouse.core.metadata.ColumnMetadata;
 import io.blinkhouse.core.metadata.EntityMetadata;
 import io.blinkhouse.core.protocol.ChOutputStream;
 import io.blinkhouse.core.type.TypeHandler;
-
-import java.io.Closeable;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Collection;
 import java.util.List;
 
 /**
- * Serialises a collection of entity rows into ClickHouse's {@code RowBinary} wire format.
+ * Serialises entities into ClickHouse {@code RowBinary} format.
  *
- * <p><strong>Format:</strong> rows are concatenated with no header, no separators, and
- * no row count prefix. Each row is the sequential serialisation of its
- * {@link EntityMetadata#getInsertableColumns() insertable columns} via their
- * {@link TypeHandler#write} implementations.
+ * <p>Wraps an {@link OutputStream} and writes rows by invoking each column's
+ * {@link TypeHandler} in declaration order. The header-free {@code RowBinary}
+ * format is used for writes (the server infers column positions from the
+ * {@code INSERT} column list in the query string).
  *
- * <p>This is intentionally different from {@code RowBinaryWithNamesAndTypes} (used for
- * reads). For writes, ClickHouse uses the column list from the INSERT statement itself
- * as the schema — the binary body is schema-free. The INSERT SQL is built by
- * {@link BatchWriter} and includes an explicit column list derived from
- * {@code insertableColumns}.
- *
- * <p>One instance per flush block. Create, write all rows, close to release the stream.
- * Not thread-safe — owned by a single flusher thread.
- *
- * @param <T> entity type
+ * @param <T> the entity type
  */
-public final class RowBinaryWriter<T> implements Closeable {
+@SuppressWarnings("unchecked")
+public final class RowBinaryWriter<T> {
 
     private final EntityMetadata<T> metadata;
-    private final ChOutputStream out;
-    private long bytesWritten = 0;
     private final CountingOutputStream counter;
+    private final ChOutputStream out;
 
     /**
-     * Wraps {@code outputStream} with a {@link ChOutputStream} and binds to the
-     * entity metadata for this writer's lifetime.
+     * Constructs a writer that wraps {@code target}.
+     *
+     * @param metadata the resolved entity metadata
+     * @param target   the stream to write RowBinary bytes into
      */
-    public RowBinaryWriter(EntityMetadata<T> metadata, OutputStream outputStream) {
+    public RowBinaryWriter(EntityMetadata<T> metadata, OutputStream target) {
         this.metadata = metadata;
-        this.counter = new CountingOutputStream(outputStream);
+        this.counter = new CountingOutputStream(target);
         this.out = new ChOutputStream(counter);
     }
 
     /**
-     * Serialises a single row into the output stream.
+     * Serialises {@code entity} as one RowBinary row.
      *
-     * @throws IOException if the underlying stream fails
+     * @param entity the entity to write
+     * @throws IOException on I/O error
      */
-    @SuppressWarnings({"unchecked", "rawtypes"})
     public void writeRow(T entity) throws IOException {
-        for (ColumnMetadata<T> col : metadata.getInsertableColumns()) {
+        List<ColumnMetadata<T>> cols = metadata.getInsertableColumns();
+        for (ColumnMetadata<T> col : cols) {
             Object value = col.getAccessor().get(entity);
-            TypeHandler handler = col.getHandler();
-            handler.write(out, value);
+            ((TypeHandler<Object>) col.getHandler()).write(out, value);
         }
     }
 
     /**
-     * Convenience method — writes all rows in the collection.
+     * Serialises all entities in {@code rows}.
      *
-     * @throws IOException if the underlying stream fails
+     * @param rows the entities to write; must not be {@code null}
+     * @throws IOException on I/O error
      */
-    public void writeAll(Collection<? extends T> rows) throws IOException {
+    public void writeAll(Collection<T> rows) throws IOException {
         for (T row : rows) {
             writeRow(row);
         }
-        out.flush();
     }
 
     /**
-     * Total bytes written so far (including any bytes not yet flushed to the
-     * underlying stream). Updated after each {@link #writeRow} call.
-     */
-    public long getBytesWritten() {
-        return counter.getCount();
-    }
-
-    /**
-     * Builds the INSERT SQL for this entity's insertable columns.
+     * Builds the {@code INSERT INTO ... FORMAT RowBinary} SQL string.
      *
-     * <p>Example: {@code INSERT INTO `db`.`tbl` (col_a, col_b, col_c) FORMAT RowBinary}
+     * @return the SQL statement for this entity's table
      */
     public String buildInsertSql() {
-        List<ColumnMetadata<T>> insertable = metadata.getInsertableColumns();
-        StringBuilder sb = new StringBuilder("INSERT INTO ")
-                .append(metadata.getQualifiedName())
-                .append(" (");
-        for (int i = 0; i < insertable.size(); i++) {
+        StringBuilder sb = new StringBuilder("INSERT INTO ");
+        sb.append(metadata.getQualifiedName());
+        sb.append(" (");
+        List<ColumnMetadata<T>> cols = metadata.getInsertableColumns();
+        for (int i = 0; i < cols.size(); i++) {
             if (i > 0) {
                 sb.append(", ");
             }
-            sb.append('`').append(insertable.get(i).getName()).append('`');
+            sb.append('`').append(cols.get(i).getName()).append('`');
         }
         sb.append(") FORMAT RowBinary");
         return sb.toString();
     }
 
-    @Override
-    public void close() throws IOException {
-        out.close();
+    /**
+     * Returns the total number of bytes written to the underlying stream.
+     *
+     * @return byte count
+     */
+    public long getBytesWritten() {
+        return counter.getCount();
     }
 
-    /** Wraps an OutputStream to count bytes written. */
+    /** Flushes the underlying stream. */
+    public void flush() throws IOException {
+        out.flush();
+    }
+
     private static final class CountingOutputStream extends OutputStream {
 
         private final OutputStream delegate;
-        private long count = 0;
+        private long count;
 
         CountingOutputStream(OutputStream delegate) {
             this.delegate = delegate;
@@ -129,19 +120,8 @@ public final class RowBinaryWriter<T> implements Closeable {
         }
 
         @Override
-        public void write(byte[] b) throws IOException {
-            delegate.write(b);
-            count += b.length;
-        }
-
-        @Override
         public void flush() throws IOException {
             delegate.flush();
-        }
-
-        @Override
-        public void close() throws IOException {
-            delegate.close();
         }
 
         long getCount() {

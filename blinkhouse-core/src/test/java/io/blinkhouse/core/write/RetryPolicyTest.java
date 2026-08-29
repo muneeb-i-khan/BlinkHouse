@@ -6,45 +6,39 @@ import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Unit tests for {@link RetryPolicy}.
+ */
 class RetryPolicyTest {
 
     @Test
-    void firstAttemptHasZeroDelay() {
+    void attempt0_returnsZeroDelay() {
         RetryPolicy policy = RetryPolicy.defaults();
         assertThat(policy.delayFor(0)).isEqualTo(Duration.ZERO);
     }
 
     @Test
-    void subsequentAttemptsHavePositiveDelay() {
-        RetryPolicy policy = new RetryPolicy(6, Duration.ofMillis(100), 2.0, Duration.ofSeconds(30));
-        // delay is jittered so we can only assert it's in [0, max]
-        for (int i = 1; i <= 4; i++) {
-            Duration d = policy.delayFor(i);
-            assertThat(d.toMillis())
-                    .as("attempt " + i + " delay should be non-negative")
-                    .isGreaterThanOrEqualTo(0);
-            assertThat(d.compareTo(Duration.ofSeconds(30)))
-                    .as("attempt " + i + " delay should not exceed maxDelay")
-                    .isLessThanOrEqualTo(0);
+    void attempt1_returnsPositiveDelay() {
+        RetryPolicy policy = RetryPolicy.defaults();
+        Duration delay = policy.delayFor(1);
+        assertThat(delay).isGreaterThanOrEqualTo(Duration.ZERO);
+        assertThat(delay).isLessThanOrEqualTo(policy.initialDelay());
+    }
+
+    @Test
+    void delayIsCappedAtMaxDelay() {
+        RetryPolicy policy = RetryPolicy.defaults();
+        for (int i = 0; i < 20; i++) {
+            Duration delay = policy.delayFor(i);
+            assertThat(delay).isLessThanOrEqualTo(policy.maxDelay());
         }
     }
 
     @Test
-    void hasNextAttemptRespectsBound() {
-        RetryPolicy policy = new RetryPolicy(3, Duration.ofMillis(100), 2.0, Duration.ofSeconds(30));
+    void hasNextAttempt_respectsMaxAttempts() {
+        RetryPolicy policy = new RetryPolicy(3, Duration.ofMillis(100), 2.0, Duration.ofSeconds(10));
         assertThat(policy.hasNextAttempt(0)).isTrue();
-        assertThat(policy.hasNextAttempt(2)).isTrue();
-        assertThat(policy.hasNextAttempt(3)).isFalse();
-    }
-
-    @Test
-    void delayIsCappeAtMaxDelay() {
-        RetryPolicy policy = new RetryPolicy(10, Duration.ofMillis(1000), 10.0, Duration.ofMillis(500));
-        // After several doublings, jittered delay must still be ≤ maxDelay
-        for (int i = 1; i <= 10; i++) {
-            assertThat(policy.delayFor(i).toMillis())
-                    .as("attempt " + i + " must not exceed maxDelay=500ms")
-                    .isLessThanOrEqualTo(500);
-        }
+        assertThat(policy.hasNextAttempt(1)).isTrue();
+        assertThat(policy.hasNextAttempt(2)).isFalse();
     }
 }

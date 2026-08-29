@@ -1,26 +1,25 @@
 package io.blinkhouse.core.write;
 
 /**
- * What {@link BatchWriter} does when a producer calls {@code add()} and the ring
- * buffer is full.
+ * Policy applied when the {@link BatchWriter} ring buffer is full.
  */
 public enum BackpressurePolicy {
 
     /**
-     * Block the producer thread until space becomes available or the acquire timeout
-     * expires, then throw {@link io.blinkhouse.core.exception.ChBackpressureException}.
+     * Block the calling thread until space is available.
+     * Safe for controlled producers; risks head-of-line blocking under sustained overload.
      */
     BLOCK,
 
     /**
-     * Evict the oldest row from the buffer to make room, increment the dropped-row
-     * metric, and accept the new row without blocking.
+     * Evict the oldest buffered item to make room for the new one.
+     * Preserves recency at the cost of dropping the oldest data.
      */
     DROP_OLDEST,
 
     /**
-     * Throw {@link io.blinkhouse.core.exception.ChBufferFullException} immediately
-     * without any blocking or eviction.
+     * Throw a {@link io.blinkhouse.core.exception.ChBufferFullException} immediately.
+     * Lets the caller decide how to handle back-pressure.
      */
     FAIL
 }

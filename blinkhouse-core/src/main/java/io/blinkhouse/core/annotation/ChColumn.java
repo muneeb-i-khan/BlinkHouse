@@ -6,46 +6,49 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Customises the ClickHouse mapping for a single field or record component.
+ * Per-column mapping override for a field or record component.
  *
- * <p>All attributes are optional. Omitting {@link #name()} uses the naming strategy
- * (default: snake_case). Omitting {@link #type()} uses type-registry inference from
- * the Java type.
+ * <p>All attributes are optional. Without this annotation the column name is derived
+ * by the naming strategy (snake_case by default) and the ClickHouse type is inferred
+ * from the Java type.
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ ElementType.FIELD, ElementType.RECORD_COMPONENT })
 public @interface ChColumn {
 
-    /** Explicit ClickHouse column name. Empty string means "use naming strategy". */
+    /** Column name override. Defaults to the naming strategy applied to the field name. */
     String name() default "";
 
     /**
-     * Explicit ClickHouse type override, e.g. {@code "LowCardinality(String)"} or
-     * {@code "DateTime64(3,'UTC')"}. Empty string means "infer from Java type".
+     * Explicit ClickHouse type override, e.g. {@code "LowCardinality(String)"},
+     * {@code "DateTime64(3,'UTC')"}. When absent the type is inferred from the Java type.
      */
     String type() default "";
 
-    /** Whether this column is nullable ({@code Nullable(T)} wrapper). */
+    /** Whether the column is nullable. When {@code true} the type is wrapped in {@code Nullable(...)}. */
     boolean nullable() default false;
 
-    /** Server-side DEFAULT expression, e.g. {@code "now64(3)"}. */
+    /** {@code DEFAULT} expression evaluated server-side, e.g. {@code "now64(3)"}. */
     String defaultExpression() default "";
 
-    /** If true, the column is a MATERIALIZED expression (not included in INSERT). */
-    boolean materialized() default false;
+    /** {@code MATERIALIZED} expression — column is not insertable. */
+    String materialized() default "";
 
-    /** If true, the column is an ALIAS expression (not stored, not in INSERT). */
-    boolean alias() default false;
+    /** {@code ALIAS} expression — column is not stored, computed on read. */
+    String alias() default "";
 
-    /** If true, the column is EPHEMERAL (not stored at all). */
+    /** When {@code true} the column is excluded from storage and write path. */
     boolean ephemeral() default false;
 
-    /** Column-level TTL expression. */
+    /** Per-column TTL expression, e.g. {@code "ts + INTERVAL 30 DAY"}. */
     String ttl() default "";
 
     /** Optional column comment. */
     String comment() default "";
 
-    /** Physical column order. Lower values come first in the INSERT column list. */
+    /**
+     * Physical column order in the DDL. Columns are sorted ascending by this value;
+     * columns without an explicit order are placed last in declaration order.
+     */
     int order() default Integer.MAX_VALUE;
 }

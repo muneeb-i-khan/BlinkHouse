@@ -4,79 +4,91 @@ import io.blinkhouse.core.exception.ChErrorCode;
 import io.blinkhouse.core.exception.ChException;
 import org.junit.jupiter.api.Test;
 
-import static io.blinkhouse.core.write.ErrorClassifier.Classification.*;
+import static io.blinkhouse.core.write.ErrorClassifier.Classification.RETRYABLE;
+import static io.blinkhouse.core.write.ErrorClassifier.Classification.RETRYABLE_HALVE_BATCH;
+import static io.blinkhouse.core.write.ErrorClassifier.Classification.TERMINAL;
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Unit tests for {@link ErrorClassifier}.
+ */
 class ErrorClassifierTest {
 
-    private final ErrorClassifier classifier = new ErrorClassifier();
-
     @Test
-    void timeoutIsRetryable() {
-        assertThat(classify(ChErrorCode.TIMEOUT_EXCEEDED)).isEqualTo(RETRYABLE);
+    void memoryLimitExceeded_isRetryableHalveBatch() {
+        ChException ex = new ChException("memory limit", ChErrorCode.MEMORY_LIMIT_EXCEEDED);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(RETRYABLE_HALVE_BATCH);
     }
 
     @Test
-    void tooManySimultaneousQueriesIsRetryable() {
-        assertThat(classify(ChErrorCode.TOO_MANY_SIMULTANEOUS_QUERIES)).isEqualTo(RETRYABLE);
+    void tooManyParts_isRetryableHalveBatch() {
+        ChException ex = new ChException("too many parts", ChErrorCode.TOO_MANY_PARTS);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(RETRYABLE_HALVE_BATCH);
     }
 
     @Test
-    void networkErrorIsRetryable() {
-        assertThat(classify(ChErrorCode.NETWORK_ERROR)).isEqualTo(RETRYABLE);
+    void timeoutExceeded_isRetryable() {
+        ChException ex = new ChException("timeout", ChErrorCode.TIMEOUT_EXCEEDED);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(RETRYABLE);
     }
 
     @Test
-    void socketTimeoutIsRetryable() {
-        assertThat(classify(ChErrorCode.SOCKET_TIMEOUT)).isEqualTo(RETRYABLE);
+    void tooManySimultaneousQueries_isRetryable() {
+        ChException ex = new ChException("too many queries", ChErrorCode.TOO_MANY_SIMULTANEOUS_QUERIES);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(RETRYABLE);
     }
 
     @Test
-    void keeperExceptionIsRetryable() {
-        assertThat(classify(ChErrorCode.KEEPER_EXCEPTION)).isEqualTo(RETRYABLE);
+    void noFreeConnection_isRetryable() {
+        ChException ex = new ChException("no connection", ChErrorCode.NO_FREE_CONNECTION);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(RETRYABLE);
     }
 
     @Test
-    void memoryLimitExceededIsRetryableHalveBatch() {
-        assertThat(classify(ChErrorCode.MEMORY_LIMIT_EXCEEDED)).isEqualTo(RETRYABLE_HALVE_BATCH);
+    void socketTimeout_isRetryable() {
+        ChException ex = new ChException("socket timeout", ChErrorCode.SOCKET_TIMEOUT);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(RETRYABLE);
     }
 
     @Test
-    void tooManyPartsIsRetryableHalveBatch() {
-        assertThat(classify(ChErrorCode.TOO_MANY_PARTS)).isEqualTo(RETRYABLE_HALVE_BATCH);
+    void networkError_isRetryable() {
+        ChException ex = new ChException("network error", ChErrorCode.NETWORK_ERROR);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(RETRYABLE);
     }
 
     @Test
-    void syntaxErrorIsTerminal() {
-        assertThat(classify(ChErrorCode.SYNTAX_ERROR)).isEqualTo(TERMINAL);
+    void keeperException_isRetryable() {
+        ChException ex = new ChException("keeper error", ChErrorCode.KEEPER_EXCEPTION);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(RETRYABLE);
     }
 
     @Test
-    void unknownTableIsTerminal() {
-        assertThat(classify(ChErrorCode.UNKNOWN_TABLE)).isEqualTo(TERMINAL);
+    void syntaxError_isTerminal() {
+        ChException ex = new ChException("syntax error", ChErrorCode.SYNTAX_ERROR);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(TERMINAL);
     }
 
     @Test
-    void typeMismatchIsTerminal() {
-        assertThat(classify(ChErrorCode.TYPE_MISMATCH)).isEqualTo(TERMINAL);
+    void unknownTable_isTerminal() {
+        ChException ex = new ChException("unknown table", ChErrorCode.UNKNOWN_TABLE);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(TERMINAL);
     }
 
     @Test
-    void unknownUserIsTerminal() {
-        assertThat(classify(ChErrorCode.UNKNOWN_USER)).isEqualTo(TERMINAL);
+    void unknownDatabase_isTerminal() {
+        ChException ex = new ChException("unknown db", ChErrorCode.UNKNOWN_DATABASE);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(TERMINAL);
     }
 
     @Test
-    void unknownCodeDefaultsToTerminal() {
-        assertThat(classify(99999)).isEqualTo(TERMINAL);
+    void typeMismatch_isTerminal() {
+        ChException ex = new ChException("type mismatch", ChErrorCode.TYPE_MISMATCH);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(TERMINAL);
     }
 
     @Test
-    void networkErrorClassifierReturnsRetryable() {
-        assertThat(classifier.classifyNetworkError()).isEqualTo(RETRYABLE);
-    }
-
-    private ErrorClassifier.Classification classify(int code) {
-        return classifier.classify(new ChException("test", code));
+    void unknownCode_isTerminal() {
+        ChException ex = new ChException("unknown", 9999);
+        assertThat(ErrorClassifier.classify(ex)).isEqualTo(TERMINAL);
     }
 }

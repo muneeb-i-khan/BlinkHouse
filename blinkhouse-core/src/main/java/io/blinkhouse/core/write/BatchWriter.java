@@ -1,262 +1,187 @@
 package io.blinkhouse.core.write;
 
-import io.blinkhouse.core.exception.ChBackpressureException;
 import io.blinkhouse.core.exception.ChBufferFullException;
 import io.blinkhouse.core.exception.ChException;
 import io.blinkhouse.core.exception.ChExceptionTranslator;
 import io.blinkhouse.core.metadata.EntityMetadata;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * High-throughput, asynchronous batch writer for a single ClickHouse table.
+ * High-throughput buffered writer for ClickHouse.
  *
- * <h2>Architecture</h2>
- * <ul>
- *   <li>Producers call {@link #add} / {@link #addAll} — these enqueue rows into a
- *       bounded {@link ArrayBlockingQueue} (the ring buffer).</li>
- *   <li>{@code flusherThreads} background threads drain the buffer whenever a flush
- *       trigger fires (row count, byte estimate, or elapsed time).</li>
- *   <li>Each flush serialises the batch with {@link RowBinaryWriter} and POSTs the
- *       raw bytes via {@link HttpClient} to ClickHouse's HTTP endpoint.</li>
- *   <li>On retryable failures the flusher backs off (exponential + jitter) and retries,
- *       halving the batch size for MEMORY_LIMIT_EXCEEDED / TOO_MANY_PARTS.</li>
- *   <li>On terminal failure or exhausted retries the batch is routed to the
- *       {@link BatchFailureHandler} (never silently dropped — NFR-7).</li>
- * </ul>
+ * <p>Internally maintains an MPSC ring buffer (bounded {@link ArrayBlockingQueue}).
+ * Background flusher threads drain the buffer into RowBinary HTTP POST requests.
+ * Three flush triggers fire independently: row count, byte size, and time interval.
  *
- * <h2>Thread safety</h2>
- * Multiple producer threads may call {@code add()} concurrently. Each flusher thread
- * owns its drain-and-flush cycle; no synchronisation is needed between flushers beyond
- * the queue itself.
+ * <p>Close-lifecycle: {@link #close()} drains remaining rows within the configured
+ * drain timeout, then shuts down the flusher threads. A JVM shutdown hook is
+ * registered to call {@code close()} if the application exits without calling it.
  *
- * <h2>Shutdown</h2>
- * A JVM shutdown hook triggers {@link #close()} automatically. Callers may also call
- * {@code close()} explicitly; subsequent calls are no-ops.
- *
- * @param <T> entity type
+ * @param <T> the entity type
  */
 public final class BatchWriter<T> implements AutoCloseable {
 
     private static final Logger LOG = LoggerFactory.getLogger(BatchWriter.class);
 
     private final EntityMetadata<T> metadata;
-    private final BatchWriterConfig<T> config;
+    private final BatchWriterConfig config;
     private final String baseUrl;
     private final HttpClient http;
-
-    private final ArrayBlockingQueue<T> buffer;
-    private final FlushTrigger flushTrigger;
-    private final ErrorClassifier classifier;
-    private final ChExceptionTranslator translator;
-    private final BatchWriterStats stats;
-
+    private final BlockingQueue<T> buffer;
     private final ExecutorService flusherPool;
     private final ScheduledExecutorService timerPool;
+    private final BatchWriterStats stats = new BatchWriterStats();
     private final AtomicBoolean closed = new AtomicBoolean(false);
-    private final AtomicLong bufferedByteEstimate = new AtomicLong(0);
-
-    // Rough bytes-per-row estimate used for byte-budget backpressure.
-    // Recomputed after each flush using actual serialised byte count.
-    private volatile long bytesPerRowEstimate = 256;
-
-    private final Thread shutdownHook;
+    private final Object flushSignal = new Object();
 
     /**
-     * @param metadata  resolved entity metadata (table name, columns, handlers)
-     * @param config    flush thresholds, retry policy, backpressure policy
-     * @param baseUrl   ClickHouse HTTP base URL with credentials, e.g.
-     *                  {@code http://host:8123/?user=u&password=p&database=db}
+     * Constructs a batch writer.
+     *
+     * @param metadata entity metadata for serialisation
+     * @param config   batch writer configuration
+     * @param baseUrl  ClickHouse HTTP base URL including credentials
      */
-    public BatchWriter(EntityMetadata<T> metadata, BatchWriterConfig<T> config, String baseUrl) {
+    public BatchWriter(EntityMetadata<T> metadata, BatchWriterConfig config, String baseUrl) {
         this.metadata = metadata;
         this.config = config;
         this.baseUrl = baseUrl;
         this.http = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
         this.buffer = new ArrayBlockingQueue<>(config.maxRows() * 2);
-        this.flushTrigger = new FlushTrigger(config.maxRows(), config.maxBytes(), config.flushInterval());
-        this.classifier = new ErrorClassifier();
-        this.translator = new ChExceptionTranslator();
-        this.stats = new BatchWriterStats();
 
-        this.flusherPool = Executors.newFixedThreadPool(config.flusherThreads(),
-                r -> {
-                    Thread t = new Thread(r, "bh-flusher-" + metadata.getTable());
-                    t.setDaemon(true);
-                    return t;
-                });
-
-        this.timerPool = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "bh-timer-" + metadata.getTable());
+        this.flusherPool = Executors.newFixedThreadPool(config.flusherThreads(), r -> {
+            Thread t = new Thread(r, "blinkhouse-flusher-" + metadata.getTable());
             t.setDaemon(true);
             return t;
         });
 
-        // Start flusher threads
+        this.timerPool = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "blinkhouse-timer-" + metadata.getTable());
+            t.setDaemon(true);
+            return t;
+        });
+
         for (int i = 0; i < config.flusherThreads(); i++) {
             flusherPool.submit(this::flusherLoop);
         }
 
-        // Interval timer — wakes a flusher even when thresholds aren't met
-        long intervalMs = config.flushInterval().toMillis();
         timerPool.scheduleAtFixedRate(
-                this::signalFlush, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+            () -> {
+                synchronized (flushSignal) {
+                    flushSignal.notifyAll();
+                }
+            },
+            config.flushInterval().toMillis(),
+            config.flushInterval().toMillis(),
+            TimeUnit.MILLISECONDS
+        );
 
-        // JVM shutdown hook — drain remaining rows before process exit
-        this.shutdownHook = new Thread(this::drainOnShutdown, "bh-shutdown-" + metadata.getTable());
-        Runtime.getRuntime().addShutdownHook(shutdownHook);
+        Runtime.getRuntime().addShutdownHook(new Thread(this::quietClose, "blinkhouse-shutdown-" + metadata.getTable()));
     }
-
-    // -------------------------------------------------------------------------
-    // Producer API
-    // -------------------------------------------------------------------------
 
     /**
-     * Enqueues {@code row} for batch insertion.
+     * Adds a single entity to the buffer, applying backpressure policy if full.
      *
-     * <p>Behaviour when the buffer is full depends on the configured
-     * {@link BackpressurePolicy}:
-     * <ul>
-     *   <li>{@code BLOCK} — blocks until space is available or the acquire timeout
-     *       expires, then throws {@link ChBackpressureException}.</li>
-     *   <li>{@code DROP_OLDEST} — evicts the oldest row, increments the dropped metric,
-     *       and accepts the new row without blocking.</li>
-     *   <li>{@code FAIL} — throws {@link ChBufferFullException} immediately.</li>
-     * </ul>
+     * @param entity the entity to buffer
+     * @throws ChBufferFullException if the policy is FAIL and the buffer is full
+     * @throws InterruptedException  if the calling thread is interrupted while blocking
      */
-    public void add(T row) {
-        checkOpen();
-        enqueue(row);
-        long estimate = bufferedByteEstimate.addAndGet(bytesPerRowEstimate);
-        if (flushTrigger.shouldFlush(buffer.size(), estimate)) {
-            signalFlush();
+    public void add(T entity) throws InterruptedException {
+        if (closed.get()) {
+            throw new ChBufferFullException("BatchWriter for " + metadata.getTable() + " is closed");
+        }
+        switch (config.backpressure()) {
+            case BLOCK -> {
+                boolean offered = buffer.offer(entity, config.acquireTimeout().toMillis(), TimeUnit.MILLISECONDS);
+                if (!offered) {
+                    throw new ChBufferFullException("Timed out waiting for buffer space in " + metadata.getTable());
+                }
+            }
+            case DROP_OLDEST -> {
+                while (!buffer.offer(entity)) {
+                    T evicted = buffer.poll();
+                    if (evicted != null) {
+                        stats.recordDropped(1);
+                    }
+                }
+            }
+            case FAIL -> {
+                if (!buffer.offer(entity)) {
+                    throw new ChBufferFullException("Buffer full for " + metadata.getTable() + " (FAIL policy)");
+                }
+            }
+            default -> throw new IllegalStateException("Unknown backpressure policy: " + config.backpressure());
+        }
+        if (buffer.size() >= config.maxRows()) {
+            synchronized (flushSignal) {
+                flushSignal.notifyAll();
+            }
         }
     }
 
-    /** Enqueues all rows in {@code rows}. Equivalent to calling {@link #add} for each. */
-    public void addAll(Collection<? extends T> rows) {
-        checkOpen();
-        for (T row : rows) {
-            enqueue(row);
-        }
-        long estimate = bufferedByteEstimate.addAndGet(bytesPerRowEstimate * rows.size());
-        if (flushTrigger.shouldFlush(buffer.size(), estimate)) {
-            signalFlush();
-        }
-    }
-
-    /** Returns a snapshot of accumulated write statistics. */
+    /**
+     * Returns a point-in-time snapshot of writer statistics.
+     *
+     * @return the current stats snapshot
+     */
     public BatchWriterStats.Snapshot stats() {
         return stats.snapshot();
     }
 
-    // -------------------------------------------------------------------------
-    // Shutdown
-    // -------------------------------------------------------------------------
-
-    /**
-     * Drains buffered rows (up to {@link BatchWriterConfig#drainTimeout()}), then
-     * shuts down flusher threads. Idempotent — subsequent calls are no-ops.
-     */
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
-        try {
-            Runtime.getRuntime().removeShutdownHook(shutdownHook);
-        } catch (IllegalStateException ignored) {
-            // JVM is already shutting down — hook is being run, not registered
-        }
-        drain(config.drainTimeout());
-        timerPool.shutdownNow();
-        flusherPool.shutdownNow();
-    }
-
-    // -------------------------------------------------------------------------
-    // Internal — enqueue with backpressure
-    // -------------------------------------------------------------------------
-
-    private void enqueue(T row) {
-        switch (config.backpressure()) {
-            case BLOCK -> {
-                try {
-                    boolean accepted = buffer.offer(
-                            row, config.acquireTimeout().toMillis(), TimeUnit.MILLISECONDS);
-                    if (!accepted) {
-                        throw new ChBackpressureException(
-                                "BatchWriter buffer full after " + config.acquireTimeout()
-                                + " wait for table " + metadata.getQualifiedName());
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new ChBackpressureException(
-                            "Interrupted while waiting for buffer space for table "
-                            + metadata.getQualifiedName());
-                }
-            }
-            case DROP_OLDEST -> {
-                if (!buffer.offer(row)) {
-                    T dropped = buffer.poll();
-                    if (dropped != null) {
-                        stats.recordDropped(1);
-                    }
-                    buffer.offer(row);
-                }
-            }
-            case FAIL -> {
-                if (!buffer.offer(row)) {
-                    throw new ChBufferFullException(
-                            "BatchWriter buffer full for table " + metadata.getQualifiedName()
-                            + "; configure a larger buffer or use BackpressurePolicy.BLOCK");
-                }
-            }
-            default -> throw new IllegalStateException(
-                    "Unhandled backpressure policy: " + config.backpressure());
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Internal — flush loop
-    // -------------------------------------------------------------------------
-
-    private final Object flushSignal = new Object();
-
-    private void signalFlush() {
+        timerPool.shutdown();
         synchronized (flushSignal) {
             flushSignal.notifyAll();
+        }
+        try {
+            flusherPool.shutdown();
+            boolean drained = flusherPool.awaitTermination(config.drainTimeout().toSeconds(), TimeUnit.SECONDS);
+            if (!drained) {
+                LOG.warn("BatchWriter for {} did not drain within {}; {} rows may be lost",
+                    metadata.getTable(), config.drainTimeout(), buffer.size());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.warn("Interrupted during BatchWriter shutdown for {}", metadata.getTable());
+        }
+    }
+
+    private void quietClose() {
+        try {
+            close();
+        } catch (Exception e) {
+            LOG.error("Error during shutdown-hook close for {}", metadata.getTable(), e);
         }
     }
 
     private void flusherLoop() {
+        FlushTrigger trigger = new FlushTrigger(
+            config.maxRows(), config.maxBytes(), config.flushInterval());
         while (!closed.get() || !buffer.isEmpty()) {
             synchronized (flushSignal) {
-                if (!flushTrigger.shouldFlush(buffer.size(), bufferedByteEstimate.get())
-                        && !closed.get()) {
+                if (!trigger.shouldFlush(buffer.size(), 0) && !closed.get()) {
                     try {
                         flushSignal.wait(config.flushInterval().toMillis());
                     } catch (InterruptedException e) {
@@ -267,107 +192,75 @@ public final class BatchWriter<T> implements AutoCloseable {
             }
             if (!buffer.isEmpty()) {
                 flushOnce(config.maxRows());
+                trigger.markFlushed();
             }
         }
     }
 
+    @SuppressWarnings("unchecked")
     private void flushOnce(int batchSizeLimit) {
-        List<T> batch = drainBatch(batchSizeLimit);
+        List<T> batch = new ArrayList<>(Math.min(batchSizeLimit, buffer.size()));
+        buffer.drainTo(batch, batchSizeLimit);
         if (batch.isEmpty()) {
             return;
         }
 
         int attempt = 0;
-        int currentBatchLimit = batchSizeLimit;
-
         while (true) {
             try {
-                byte[] body = serialise(batch);
-                sendToClickHouse(body);
-
-                // Update byte-per-row estimate for backpressure accuracy
-                bytesPerRowEstimate = Math.max(1, body.length / batch.size());
-                bufferedByteEstimate.addAndGet(-(long) bytesPerRowEstimate * batch.size());
-                stats.recordInserted(batch.size(), body.length);
-                flushTrigger.markFlushed();
+                sendBatch(batch);
+                stats.recordInserted(batch.size(), 0);
                 return;
-
             } catch (ChException ex) {
-                ErrorClassifier.Classification cls = classifier.classify(ex);
-
-                if (cls == ErrorClassifier.Classification.TERMINAL) {
+                ErrorClassifier.Classification classification = ErrorClassifier.classify(ex);
+                if (classification == ErrorClassifier.Classification.TERMINAL || !config.retry().hasNextAttempt(attempt)) {
                     deadLetter(batch, ex, attempt + 1);
-                    flushTrigger.markFlushed();
                     return;
                 }
-
-                if (!config.retry().hasNextAttempt(attempt)) {
-                    deadLetter(batch, ex, attempt + 1);
-                    flushTrigger.markFlushed();
-                    return;
+                if (classification == ErrorClassifier.Classification.RETRYABLE_HALVE_BATCH && batch.size() > 1) {
+                    int mid = batch.size() / 2;
+                    List<T> second = new ArrayList<>(batch.subList(mid, batch.size()));
+                    batch = new ArrayList<>(batch.subList(0, mid));
+                    for (T item : second) {
+                        buffer.offer(item);
+                    }
                 }
-
                 stats.recordRetry();
-                LOG.warn("BatchWriter flush attempt {} failed for table {} [code={}]: {}; retrying",
-                        attempt + 1, metadata.getQualifiedName(), ex.getErrorCode(), ex.getMessage());
-
-                if (cls == ErrorClassifier.Classification.RETRYABLE_HALVE_BATCH
-                        && batch.size() > 1) {
-                    // Re-queue the second half; only retry with the first half
-                    int half = batch.size() / 2;
-                    List<T> requeue = batch.subList(half, batch.size());
-                    requeue.forEach(this::requeueSilently);
-                    batch = batch.subList(0, half);
-                    currentBatchLimit = half;
+                Duration delay = config.retry().delayFor(attempt + 1);
+                if (!delay.isZero()) {
+                    try {
+                        Thread.sleep(delay.toMillis());
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        deadLetter(batch, ex, attempt + 1);
+                        return;
+                    }
                 }
-
-                sleepFor(config.retry().delayFor(attempt));
                 attempt++;
-
             } catch (IOException ex) {
-                // Network-level failure — always retryable
+                ChException chEx = ChExceptionTranslator.translateNetworkError(ex);
                 if (!config.retry().hasNextAttempt(attempt)) {
-                    ChException wrapped = translator.translateNetworkError(ex);
-                    deadLetter(batch, wrapped, attempt + 1);
-                    flushTrigger.markFlushed();
+                    deadLetter(batch, chEx, attempt + 1);
                     return;
                 }
                 stats.recordRetry();
-                LOG.warn("BatchWriter network error on attempt {} for table {}: {}; retrying",
-                        attempt + 1, metadata.getQualifiedName(), ex.getMessage());
-                sleepFor(config.retry().delayFor(attempt));
                 attempt++;
             }
         }
     }
 
-    private List<T> drainBatch(int limit) {
-        List<T> batch = new ArrayList<>(Math.min(limit, buffer.size()));
-        buffer.drainTo(batch, limit);
-        return batch;
-    }
-
-    @SuppressWarnings("unchecked")
-    private byte[] serialise(List<T> batch) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream(
-                (int) Math.min(bytesPerRowEstimate * batch.size(), Integer.MAX_VALUE));
-        try (RowBinaryWriter<T> writer = new RowBinaryWriter<>(metadata, baos)) {
+    private void sendBatch(List<T> batch) throws ChException, IOException {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream(batch.size() * 64);
+        RowBinaryWriter<T> writer = new RowBinaryWriter<>(metadata, buf);
+        try {
             writer.writeAll(batch);
+            writer.flush();
+        } catch (IOException e) {
+            throw new ChException("Failed to serialise batch: " + e.getMessage(), e);
         }
-        return baos.toByteArray();
-    }
 
-    private void sendToClickHouse(byte[] body) throws ChException, IOException {
-        RowBinaryWriter<T> tmp = new RowBinaryWriter<>(metadata,
-                new java.io.OutputStream() {
-                    public void write(int b) {}
-                    public void write(byte[] b, int off, int len) {}
-                });
-        String insertSql = tmp.buildInsertSql();
-
-        String url = baseUrl
-                + (baseUrl.contains("?") ? "&" : "?")
-                + "query=" + URLEncoder.encode(insertSql, StandardCharsets.UTF_8);
+        String query = writer.buildInsertSql();
+        String url = baseUrl + "&query=" + java.net.URLEncoder.encode(query, java.nio.charset.StandardCharsets.UTF_8);
         if (config.asyncInsert()) {
             url += "&async_insert=1";
             if (config.waitForAsyncInsert()) {
@@ -375,94 +268,33 @@ public final class BatchWriter<T> implements AutoCloseable {
             }
         }
 
+        byte[] body = buf.toByteArray();
         HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/octet-stream")
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-                .build();
+            .uri(URI.create(url))
+            .header("Content-Type", "application/octet-stream")
+            .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+            .build();
 
         HttpResponse<String> resp;
         try {
             resp = http.send(req, HttpResponse.BodyHandlers.ofString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IOException("Interrupted during HTTP send", e);
+            throw new ChException("HTTP send interrupted", e);
         }
 
-        if (resp.statusCode() != 200) {
-            ChException ex = translator.translate(resp.body(), resp.statusCode());
-            throw ex;
+        if (resp.statusCode() >= 400) {
+            throw ChExceptionTranslator.translate(resp.body(), resp.statusCode());
         }
     }
 
-    private void deadLetter(List<T> batch, ChException cause, int attempts) {
+    @SuppressWarnings("unchecked")
+    private void deadLetter(List<T> batch, ChException ex, int attempts) {
+        LOG.error("Dead-lettering {} rows for {} after {} attempts: {}",
+            batch.size(), metadata.getTable(), attempts, ex.getMessage());
         stats.recordDeadLettered(batch.size());
-        bufferedByteEstimate.addAndGet(-(long) bytesPerRowEstimate * batch.size());
-
         if (config.failureHandler() != null) {
-            try {
-                config.failureHandler().onFailure(batch, cause, attempts);
-            } catch (Exception handlerEx) {
-                LOG.error("BatchFailureHandler threw for table {}", metadata.getQualifiedName(), handlerEx);
-            }
-        } else {
-            LOG.error("BatchWriter dead-lettered {} rows for table {} after {} attempts. Cause: {}",
-                    batch.size(), metadata.getQualifiedName(), attempts, cause.getMessage());
-        }
-    }
-
-    private void requeueSilently(T row) {
-        // Best-effort re-enqueue of the second half during batch-halving retry;
-        // if the buffer is still full after a flush attempt, drop rather than deadlock
-        if (!buffer.offer(row)) {
-            stats.recordDropped(1);
-        }
-    }
-
-    private void drain(Duration timeout) {
-        Instant deadline = Instant.now().plus(timeout);
-        while (!buffer.isEmpty() && Instant.now().isBefore(deadline)) {
-            flushOnce(config.maxRows());
-        }
-        if (!buffer.isEmpty()) {
-            int remaining = buffer.size();
-            LOG.warn("BatchWriter closed with {} rows still in buffer for table {} "
-                    + "(drain timeout {} exceeded); dead-lettering remaining rows",
-                    remaining, metadata.getQualifiedName(), timeout);
-            List<T> leftover = drainBatch(remaining);
-            if (!leftover.isEmpty()) {
-                ChException cause = new ChException(
-                        "BatchWriter closed; remaining rows could not be flushed within drain timeout");
-                deadLetter(leftover, cause, 0);
-            }
-        }
-    }
-
-    private void drainOnShutdown() {
-        if (closed.compareAndSet(false, true)) {
-            LOG.info("BatchWriter shutdown hook triggered for table {}; draining...",
-                    metadata.getQualifiedName());
-            drain(config.drainTimeout());
-            timerPool.shutdownNow();
-            flusherPool.shutdownNow();
-        }
-    }
-
-    private void checkOpen() {
-        if (closed.get()) {
-            throw new IllegalStateException(
-                    "BatchWriter for table " + metadata.getQualifiedName() + " is closed");
-        }
-    }
-
-    private static void sleepFor(Duration d) {
-        if (d.isZero() || d.isNegative()) {
-            return;
-        }
-        try {
-            Thread.sleep(d.toMillis());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            ((BatchFailureHandler<T>) config.failureHandler()).onFailure(batch, ex, attempts);
         }
     }
 }

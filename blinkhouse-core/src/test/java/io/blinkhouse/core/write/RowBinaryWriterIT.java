@@ -1,14 +1,11 @@
 package io.blinkhouse.core.write;
 
-import io.blinkhouse.core.annotation.ChColumn;
 import io.blinkhouse.core.annotation.ChTable;
 import io.blinkhouse.core.metadata.EntityMetadata;
 import io.blinkhouse.core.metadata.EntityMetadataFactory;
 import io.blinkhouse.core.testcontainers.ClickHouseContainerExtension;
 import io.blinkhouse.core.type.TypeRegistry;
-import io.blinkhouse.core.type.handler.UInt64Handler;
-import io.blinkhouse.core.type.handler.UuidHandler;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -16,10 +13,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
@@ -27,130 +24,104 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Integration test: serialise rows via {@link RowBinaryWriter}, POST to a live ClickHouse
- * container using the HTTP RowBinary format, then SELECT back and verify row count.
+ * Integration tests for {@link RowBinaryWriter}: verifies that the RowBinary serialisation
+ * produces bytes that ClickHouse can ingest correctly.
  */
 @Testcontainers
 class RowBinaryWriterIT {
 
+    @ChTable(name = "rbw_test", orderBy = "id")
+    record TestRow(long id, UUID traceId) {}
+
     @Container
     static final GenericContainer<?> CH = ClickHouseContainerExtension.INSTANCE;
 
-    private static final HttpClient HTTP = HttpClient.newHttpClient();
+    private final HttpClient http = HttpClient.newHttpClient();
+    private EntityMetadata<TestRow> metadata;
 
-    @ChTable(name = "rbw_test", orderBy = "id")
-    record TestRow(
-            @ChColumn(type = "UInt64") long id,
-            @ChColumn(type = "UUID")  UUID traceId
-    ) {}
+    @BeforeEach
+    void setUp() throws Exception {
+        EntityMetadataFactory factory = new EntityMetadataFactory(TypeRegistry.withDefaults());
+        metadata = factory.resolve(TestRow.class);
 
-    @BeforeAll
-    static void createTable() throws Exception {
-        execute("""
-                CREATE TABLE IF NOT EXISTS rbw_test (
-                    id      UInt64,
-                    trace_id UUID
-                ) ENGINE = MergeTree() ORDER BY id
-                """);
-        execute("TRUNCATE TABLE rbw_test");
+        execute("DROP TABLE IF EXISTS rbw_test");
+        execute("CREATE TABLE rbw_test (id UInt64, trace_id UUID) ENGINE=MergeTree() ORDER BY id");
     }
 
     @Test
-    void writesRowsAndClickHouseSeesCorrectCount() throws Exception {
-        TypeRegistry registry = TypeRegistry.withDefaults();
-        EntityMetadataFactory factory = new EntityMetadataFactory(registry);
-        EntityMetadata<TestRow> metadata = factory.resolve(TestRow.class);
+    void insertSingleRow_roundTrips() throws Exception {
+        TestRow row = new TestRow(1L, UUID.fromString("11111111-2222-3333-4444-555555555555"));
 
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        RowBinaryWriter<TestRow> writer = new RowBinaryWriter<>(metadata, buf);
+        writer.writeRow(row);
+        writer.flush();
+
+        String query = writer.buildInsertSql();
+        String url = ClickHouseContainerExtension.baseUrl()
+            + "&query=" + URLEncoder.encode(query, StandardCharsets.UTF_8);
+        HttpRequest req = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .header("Content-Type", "application/octet-stream")
+            .POST(HttpRequest.BodyPublishers.ofByteArray(buf.toByteArray()))
+            .build();
+        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+        assertThat(resp.statusCode()).isEqualTo(200);
+
+        String countResult = queryString("SELECT count() FROM rbw_test WHERE id = 1");
+        assertThat(countResult.strip()).isEqualTo("1");
+    }
+
+    @Test
+    void insertBatch_writesAllRows() throws Exception {
         List<TestRow> rows = List.of(
-                new TestRow(1L, UUID.fromString("550e8400-e29b-41d4-a716-446655440000")),
-                new TestRow(2L, UUID.fromString("550e8400-e29b-41d4-a716-446655440001")),
-                new TestRow(3L, UUID.fromString("550e8400-e29b-41d4-a716-446655440002"))
+            new TestRow(10L, UUID.randomUUID()),
+            new TestRow(11L, UUID.randomUUID()),
+            new TestRow(12L, UUID.randomUUID())
         );
 
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (RowBinaryWriter<TestRow> writer = new RowBinaryWriter<>(metadata, baos)) {
-            writer.writeAll(rows);
-        }
-        byte[] body = baos.toByteArray();
-        assertThat(body.length).isGreaterThan(0);
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        RowBinaryWriter<TestRow> writer = new RowBinaryWriter<>(metadata, buf);
+        writer.writeAll(rows);
+        writer.flush();
 
-        // Post the serialised rows
-        String insertSql = "INSERT INTO rbw_test (id, trace_id) FORMAT RowBinary";
+        String query = writer.buildInsertSql();
         String url = ClickHouseContainerExtension.baseUrl()
-                + "&query=" + URLEncoder.encode(insertSql, StandardCharsets.UTF_8);
+            + "&query=" + URLEncoder.encode(query, StandardCharsets.UTF_8);
         HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/octet-stream")
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-                .build();
-        HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
-        assertThat(resp.statusCode())
-                .as("Insert response body: " + resp.body())
-                .isEqualTo(200);
+            .uri(URI.create(url))
+            .header("Content-Type", "application/octet-stream")
+            .POST(HttpRequest.BodyPublishers.ofByteArray(buf.toByteArray()))
+            .build();
+        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+        assertThat(resp.statusCode()).isEqualTo(200);
 
-        // Verify row count
-        String countSql = "SELECT count() FROM rbw_test FORMAT RowBinary";
-        long count = selectCount(countSql);
-        assertThat(count).isEqualTo(3);
+        String count = queryString("SELECT count() FROM rbw_test WHERE id IN (10,11,12)");
+        assertThat(count.strip()).isEqualTo("3");
     }
 
     @Test
-    void bytesWrittenIsNonZeroAfterWrite() throws Exception {
-        TypeRegistry registry = TypeRegistry.withDefaults();
-        EntityMetadataFactory factory = new EntityMetadataFactory(registry);
-        EntityMetadata<TestRow> metadata = factory.resolve(TestRow.class);
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        RowBinaryWriter<TestRow> writer = new RowBinaryWriter<>(metadata, baos);
-        writer.writeRow(new TestRow(99L, UUID.randomUUID()));
-        assertThat(writer.getBytesWritten()).isGreaterThan(0);
-        writer.close();
+    void buildInsertSql_containsTableAndColumns() {
+        RowBinaryWriter<TestRow> writer = new RowBinaryWriter<>(metadata, new ByteArrayOutputStream());
+        String sql = writer.buildInsertSql();
+        assertThat(sql).contains("`rbw_test`");
+        assertThat(sql).contains("`id`");
+        assertThat(sql).contains("`trace_id`");
+        assertThat(sql).endsWith("FORMAT RowBinary");
     }
 
-    @Test
-    void buildInsertSqlIncludesAllInsertableColumns() throws Exception {
-        TypeRegistry registry = TypeRegistry.withDefaults();
-        EntityMetadataFactory factory = new EntityMetadataFactory(registry);
-        EntityMetadata<TestRow> metadata = factory.resolve(TestRow.class);
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (RowBinaryWriter<TestRow> writer = new RowBinaryWriter<>(metadata, baos)) {
-            String sql = writer.buildInsertSql();
-            assertThat(sql).contains("INSERT INTO");
-            assertThat(sql).contains("`id`");
-            assertThat(sql).contains("`trace_id`");
-            assertThat(sql).endsWith("FORMAT RowBinary");
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
-    private static void execute(String sql) throws Exception {
+    private void execute(String sql) throws Exception {
         String url = ClickHouseContainerExtension.baseUrl()
-                + "&query=" + URLEncoder.encode(sql, StandardCharsets.UTF_8);
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
-        HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() != 200) {
-            throw new RuntimeException("SQL failed [" + resp.statusCode() + "]: " + resp.body());
-        }
+            + "&query=" + URLEncoder.encode(sql, StandardCharsets.UTF_8);
+        HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
+            .POST(HttpRequest.BodyPublishers.noBody()).build();
+        http.send(req, HttpResponse.BodyHandlers.ofString());
     }
 
-    private static long selectCount(String sql) throws Exception {
+    private String queryString(String sql) throws Exception {
         String url = ClickHouseContainerExtension.baseUrl()
-                + "&query=" + URLEncoder.encode(sql, StandardCharsets.UTF_8);
+            + "&query=" + URLEncoder.encode(sql, StandardCharsets.UTF_8);
         HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-        HttpResponse<byte[]> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
-        // COUNT() returns a UInt64 LE 8 bytes
-        byte[] body = resp.body();
-        long value = 0;
-        for (int i = 7; i >= 0; i--) {
-            value = (value << 8) | (body[i] & 0xFF);
-        }
-        return value;
+        return http.send(req, HttpResponse.BodyHandlers.ofString()).body();
     }
 }

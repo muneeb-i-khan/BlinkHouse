@@ -1,30 +1,25 @@
 package io.blinkhouse.core.write;
 
 import io.blinkhouse.core.exception.ChException;
-
 import java.util.List;
 
 /**
- * Dead-letter callback invoked by the {@link BatchWriter} flusher when a batch
- * exhausts all retry attempts and cannot be delivered to ClickHouse.
+ * Callback invoked when a batch has exhausted all retry attempts without success.
  *
- * <p>Implementations must be fast and non-blocking — the flusher thread calls
- * this inline. Write dead letters to an external queue or log asynchronously.
+ * <p>Implementations typically write the rows to a dead-letter file, publish to a queue,
+ * or log a structured alert. The callback must be fast and must not throw.
  *
- * <p><strong>No row is ever silently dropped.</strong> If no handler is configured
- * the default implementation logs at ERROR. (NFR-7)
- *
- * @param <T> entity type
+ * @param <T> the entity type
  */
 @FunctionalInterface
 public interface BatchFailureHandler<T> {
 
     /**
-     * Called when {@code rows} could not be ingested after {@code attempts} tries.
+     * Called with the rows that could not be ingested after all retry attempts.
      *
-     * @param rows     the failed rows in original insertion order
-     * @param cause    the final exception that ended retries
-     * @param attempts total number of attempts made (≥ 1)
+     * @param rows     the rows that were not delivered to ClickHouse
+     * @param cause    the last exception that caused the failure
+     * @param attempts the total number of delivery attempts made
      */
     void onFailure(List<T> rows, ChException cause, int attempts);
 }

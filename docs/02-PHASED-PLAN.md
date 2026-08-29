@@ -138,7 +138,39 @@ List<PageView> rows = template.query(
 
 ---
 
+## Phase 2 — Write Path & Ingestion → `v0.2.0`
+**Status: Complete (2026-08-29)**
+
+**What was built:**
+- `core/exception/`: `ChException` hierarchy (8 subtypes), `ChErrorCode`, `ChExceptionTranslator`
+- `core/write/`: `ErrorClassifier`, `RetryPolicy`, `BackpressurePolicy`, `FlushTrigger`, `BatchFailureHandler`, `BatchWriterConfig`, `BatchWriterStats`, `RowBinaryWriter`, `BatchWriter`
+- `core/template/`: `ChTemplate` with `insert()`, `batchWriter()`, `insertSingleRow()` (anti-pattern instrumented)
+- `core/metadata/`: `EntityMetadata`, `ColumnMetadata`, `EngineMetadata`, `SkipIndexMetadata`, `ValueAccessor`, `EntityMetadataFactory` (reflective resolver)
+- `core/type/`: `TypeRegistry` + `StringHandler`, `Int32Handler`, `UInt32Handler` (new)
+- `core/annotation/`: `@ChTable`, `@ChColumn`, `@ChIgnore`, `@ChEngine`, `@ChCodec`, `@ChSkipIndex`, `@ChSkipIndexes`, `@ChSetting`, `Engine` enum, `IndexType` enum
+- **Tests:** 17 unit + IT tests passing, 0 Checkstyle violations
+
+---
+
 ## Phase 3 — Schema & DDL → `v0.3.0`
+**Status: Complete (2026-08-29)**
+
+**What was built:**
+- `core/schema/`: `LiveTable`, `LiveColumn`, `LiveIndex` (introspection model)
+- `SchemaIntrospector` interface + `HttpSchemaIntrospector` (queries `system.tables`, `system.columns`, `system.data_skipping_indices`)
+- `SchemaChange` sealed interface: `AddColumn`, `DropColumn`, `ModifyColumnType`, `AddIndex`, `DropIndex`, `EngineMismatch`, `OrderByMismatch`, `TtlMismatch` with `destructive()` classification
+- `SchemaDiff` — compares `EntityMetadata` vs `LiveTable`, produces typed change list
+- `SchemaMode` enum: `NONE` / `VALIDATE` / `CREATE_IF_MISSING` / `UPDATE`
+- `SchemaManager` — state machine; ADR-10 safety (UPDATE requires allowDestructive=true for destructive changes; EngineMismatch/OrderByMismatch always refused)
+- `DdlGenerator` interface + `DefaultDdlGenerator` — full `CREATE TABLE` DDL with ENGINE, ORDER BY, PARTITION BY, TTL, codecs, SETTINGS, skip indexes; `ALTER TABLE` statements
+- `MigrationScriptWriter` — timestamped `.sql` files for Flyway/Liquibase
+
+**Exit criteria met:**
+- [x] Round-trip test: `MergeTree` and `ReplacingMergeTree` generate DDL → create → introspect → diff → zero column drift
+- [x] Destructive-change guard: UPDATE mode without `allowDestructive` throws `ChSchemaException`
+- [x] `CREATE_IF_MISSING` creates table when absent; `VALIDATE` fails on missing table
+- [x] 27 integration tests pass, 12 unit tests pass, 0 Checkstyle violations
+
 **Goal:** Schema as code, with migrations that a DBA would sign off on.
 **Duration:** 4 FT-weeks
 

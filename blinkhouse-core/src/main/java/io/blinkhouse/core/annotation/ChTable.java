@@ -6,39 +6,42 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marks a Java class or record as a ClickHouse table entity.
+ * Maps a Java class or record to a ClickHouse table.
  *
- * <p>The framework resolves the target table name from {@link #name()} if set,
- * otherwise applies the configured {@code NamingStrategy} to the simple class name
- * (default: snake_case).
+ * <p>At a minimum, the annotated type must specify either {@link #name()} or rely
+ * on the framework's naming strategy (snake_case by default). For MergeTree-family
+ * engines, {@link #orderBy()} is required.
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)
 public @interface ChTable {
 
-    /** Explicit table name. Empty string means "use naming strategy". */
+    /** Table name. Defaults to the class name converted by the naming strategy. */
     String name() default "";
 
-    /** Target database. Empty string means the connection's default database. */
+    /** ClickHouse database. Defaults to the connection default database. */
     String database() default "";
 
-    /** ORDER BY clause columns (required for MergeTree family). */
+    /** {@code ORDER BY} clause column list. Required for MergeTree-family engines. */
     String[] orderBy() default {};
 
-    /** PARTITION BY expression columns. */
+    /** {@code PARTITION BY} expression columns. */
     String[] partitionBy() default {};
 
-    /** PRIMARY KEY columns (defaults to orderBy prefix if empty). */
+    /** {@code PRIMARY KEY} columns. Defaults to the full {@code ORDER BY} prefix. */
     String[] primaryKey() default {};
 
-    /** SAMPLE BY expression. */
+    /** {@code SAMPLE BY} expression. */
     String sampleBy() default "";
 
-    /** Table-level TTL expression, e.g. {@code "ts + INTERVAL 90 DAY DELETE"}. */
+    /** {@code TTL} expression, e.g. {@code "ts + INTERVAL 90 DAY DELETE"}. */
     String ttl() default "";
 
-    /** ON CLUSTER clause value for replicated setups. */
+    /** {@code ON CLUSTER} clause value for distributed DDL. */
     String onCluster() default "";
+
+    /** Additional {@code SETTINGS} key-value pairs. */
+    ChSetting[] settings() default {};
 
     /** Optional table comment. */
     String comment() default "";

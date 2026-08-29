@@ -1,21 +1,17 @@
 package io.blinkhouse.core.exception;
 
-/** Thrown when the network connection to ClickHouse fails or is refused. */
+/**
+ * Thrown when a network-level connection error prevents communication with ClickHouse.
+ */
 public final class ChConnectionException extends ChException {
 
-    public ChConnectionException(String message) {
-        super(message, ChErrorCode.NETWORK_ERROR);
-    }
-
-    public ChConnectionException(String message, int errorCode) {
-        super(message, errorCode);
-    }
-
+    /** Constructs wrapping the underlying network error. */
     public ChConnectionException(String message, Throwable cause) {
         super(message, ChErrorCode.NETWORK_ERROR, cause);
     }
 
-    public ChConnectionException(String message, int errorCode, Throwable cause) {
-        super(message, errorCode, cause);
+    /** Constructs with a message and error code (e.g. {@link ChErrorCode#NO_FREE_CONNECTION}). */
+    public ChConnectionException(String message, int errorCode) {
+        super(message, errorCode);
     }
 }

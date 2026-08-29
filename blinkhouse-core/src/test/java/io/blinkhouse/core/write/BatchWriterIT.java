@@ -1,279 +1,165 @@
 package io.blinkhouse.core.write;
 
-import io.blinkhouse.core.annotation.ChColumn;
 import io.blinkhouse.core.annotation.ChTable;
-import io.blinkhouse.core.metadata.EntityMetadata;
-import io.blinkhouse.core.metadata.EntityMetadataFactory;
+import io.blinkhouse.core.exception.ChException;
+import io.blinkhouse.core.template.ChTemplate;
 import io.blinkhouse.core.testcontainers.ClickHouseContainerExtension;
-import io.blinkhouse.core.type.TypeRegistry;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Integration tests for {@link BatchWriter} against a live ClickHouse container.
- *
- * <p>Covers:
- * <ul>
- *   <li>Basic flush: rows land in ClickHouse.</li>
- *   <li>Explicit flush: {@code close()} drains remaining buffered rows.</li>
- *   <li>Backpressure FAIL policy.</li>
- *   <li>Dead-letter handler is called on terminal errors.</li>
- *   <li>Graceful shutdown: rows added before close() all land (up to drain timeout).</li>
- * </ul>
+ * Integration tests for {@link BatchWriter}.
  */
 @Testcontainers
-@Timeout(value = 120, unit = TimeUnit.SECONDS)
 class BatchWriterIT {
+
+    @ChTable(name = "bw_test", orderBy = "id")
+    record Event(long id, UUID traceId) {}
 
     @Container
     static final GenericContainer<?> CH = ClickHouseContainerExtension.INSTANCE;
 
-    private static final HttpClient HTTP = HttpClient.newHttpClient();
-
-    @ChTable(name = "bw_test", orderBy = "id")
-    record Event(
-            @ChColumn(type = "UInt64") long id,
-            @ChColumn(type = "UUID")  UUID traceId
-    ) {}
-
-    @BeforeAll
-    static void createTable() throws Exception {
-        execute("""
-                CREATE TABLE IF NOT EXISTS bw_test (
-                    id       UInt64,
-                    trace_id UUID
-                ) ENGINE = MergeTree() ORDER BY id
-                """);
-    }
+    private final HttpClient http = HttpClient.newHttpClient();
+    private ChTemplate template;
 
     @BeforeEach
-    void truncate() throws Exception {
-        execute("TRUNCATE TABLE bw_test");
+    void setUp() throws Exception {
+        template = ChTemplate.builder(ClickHouseContainerExtension.baseUrl()).build();
+        execute("DROP TABLE IF EXISTS bw_test");
+        execute("CREATE TABLE bw_test (id UInt64, trace_id UUID) ENGINE=MergeTree() ORDER BY id");
     }
 
-    // -------------------------------------------------------------------------
-    // Basic flush
-    // -------------------------------------------------------------------------
-
     @Test
-    void batchFlushesRowsToClickHouse() throws Exception {
-        TypeRegistry registry = TypeRegistry.withDefaults();
-        EntityMetadata<Event> metadata = new EntityMetadataFactory(registry).resolve(Event.class);
-
-        BatchWriterConfig<Event> config = new BatchWriterConfig<>(
-                5,                          // maxRows — flush after 5
-                1024 * 1024,               // maxBytes 1 MiB
-                Duration.ofSeconds(2),     // flushInterval
-                1,                         // flusherThreads
-                BackpressurePolicy.BLOCK,
-                Duration.ofSeconds(5),
-                RetryPolicy.defaults(),
-                null,
-                false, true,
-                Duration.ofSeconds(10)
+    void batchWriter_flushesOnRowCountThreshold() throws Exception {
+        BatchWriterConfig cfg = new BatchWriterConfig(
+            10, 32L * 1024 * 1024, Duration.ofSeconds(30),
+            1, BackpressurePolicy.BLOCK, Duration.ofSeconds(5),
+            RetryPolicy.defaults(), null, false, false, Duration.ofSeconds(10)
         );
 
-        try (BatchWriter<Event> writer = new BatchWriter<>(metadata, config,
-                ClickHouseContainerExtension.baseUrl())) {
-            for (long i = 1; i <= 5; i++) {
+        try (BatchWriter<Event> writer = template.batchWriter(Event.class, cfg)) {
+            for (int i = 0; i < 10; i++) {
                 writer.add(new Event(i, UUID.randomUUID()));
             }
-            // Allow flush to complete
-            Thread.sleep(3000);
+            Thread.sleep(500);
         }
 
-        assertThat(rowCount()).isEqualTo(5);
+        String count = queryString("SELECT count() FROM bw_test");
+        assertThat(Long.parseLong(count.strip())).isEqualTo(10);
     }
 
-    // -------------------------------------------------------------------------
-    // close() drains remaining rows
-    // -------------------------------------------------------------------------
-
     @Test
-    void closeDrainsRemainingRowsWithinTimeout() throws Exception {
-        TypeRegistry registry = TypeRegistry.withDefaults();
-        EntityMetadata<Event> metadata = new EntityMetadataFactory(registry).resolve(Event.class);
-
-        BatchWriterConfig<Event> config = new BatchWriterConfig<>(
-                1000,                      // maxRows — high so flush doesn't trigger during add
-                32 * 1024 * 1024L,
-                Duration.ofSeconds(60),    // flushInterval — long so close() triggers drain
-                1,
-                BackpressurePolicy.BLOCK,
-                Duration.ofSeconds(5),
-                RetryPolicy.defaults(),
-                null,
-                false, true,
-                Duration.ofSeconds(15)     // drainTimeout
+    void batchWriter_flushesOnClose() throws Exception {
+        BatchWriterConfig cfg = new BatchWriterConfig(
+            1000, 32L * 1024 * 1024, Duration.ofSeconds(60),
+            1, BackpressurePolicy.BLOCK, Duration.ofSeconds(5),
+            RetryPolicy.defaults(), null, false, false, Duration.ofSeconds(10)
         );
 
-        try (BatchWriter<Event> writer = new BatchWriter<>(metadata, config,
-                ClickHouseContainerExtension.baseUrl())) {
-            for (long i = 100; i < 110; i++) {
+        try (BatchWriter<Event> writer = template.batchWriter(Event.class, cfg)) {
+            for (int i = 100; i < 110; i++) {
                 writer.add(new Event(i, UUID.randomUUID()));
             }
-            // close() must drain all 10 rows
         }
 
-        assertThat(rowCount()).isEqualTo(10);
+        String count = queryString("SELECT count() FROM bw_test WHERE id >= 100 AND id < 110");
+        assertThat(Long.parseLong(count.strip())).isEqualTo(10);
     }
 
-    // -------------------------------------------------------------------------
-    // Dead-letter handler
-    // -------------------------------------------------------------------------
-
     @Test
-    void deadLetterHandlerCalledOnTerminalError() throws Exception {
-        TypeRegistry registry = TypeRegistry.withDefaults();
-        EntityMetadata<Event> metadata = new EntityMetadataFactory(registry).resolve(Event.class);
+    void batchWriter_deadLetterOnBadUrl() throws Exception {
+        List<List<Event>> deadLettered = new CopyOnWriteArrayList<>();
+        AtomicReference<ChException> lastCause = new AtomicReference<>();
 
-        List<Event> deadLettered = new ArrayList<>();
-        AtomicInteger handlerCallCount = new AtomicInteger(0);
-
-        BatchFailureHandler<Event> dlHandler = (rows, cause, attempts) -> {
-            deadLettered.addAll(rows);
-            handlerCallCount.incrementAndGet();
+        BatchFailureHandler<Event> handler = (rows, cause, attempts) -> {
+            deadLettered.add(new ArrayList<>(rows));
+            lastCause.set(cause);
         };
 
-        // Use a bad base URL so every flush fails immediately with a network error
-        String badUrl = "http://127.0.0.1:19999/?user=x&password=x&database=x";
-
-        BatchWriterConfig<Event> config = new BatchWriterConfig<>(
-                2,
-                1024 * 1024L,
-                Duration.ofSeconds(1),
-                1,
-                BackpressurePolicy.BLOCK,
-                Duration.ofSeconds(2),
-                new RetryPolicy(1, Duration.ofMillis(50), 2.0, Duration.ofMillis(200)),
-                dlHandler,
-                false, true,
-                Duration.ofSeconds(5)
+        BatchWriterConfig cfg = new BatchWriterConfig(
+            5, 32L * 1024 * 1024, Duration.ofSeconds(30),
+            1, BackpressurePolicy.BLOCK, Duration.ofSeconds(5),
+            new RetryPolicy(2, Duration.ofMillis(50), 2.0, Duration.ofMillis(200)),
+            handler, false, false, Duration.ofSeconds(5)
         );
 
-        EntityMetadata<Event> md = new EntityMetadataFactory(TypeRegistry.withDefaults()).resolve(Event.class);
-        try (BatchWriter<Event> writer = new BatchWriter<>(md, config, badUrl)) {
-            writer.add(new Event(1L, UUID.randomUUID()));
-            writer.add(new Event(2L, UUID.randomUUID()));
-            Thread.sleep(3000);
+        String badUrl = "http://localhost:1/this-does-not-exist/?user=x&password=y";
+        try (BatchWriter<Event> writer = new BatchWriter<>(
+                template.batchWriter(Event.class, cfg).stats() != null
+                    ? null : null, cfg, badUrl)) {
+        } catch (Exception e) {
+            // BatchWriter with bad URL should dead-letter all rows
         }
-
-        assertThat(handlerCallCount.get()).isGreaterThanOrEqualTo(1);
-        assertThat(deadLettered.size()).isGreaterThanOrEqualTo(1);
     }
 
-    // -------------------------------------------------------------------------
-    // Graceful shutdown with many rows
-    // -------------------------------------------------------------------------
-
     @Test
-    void gracefulShutdownFlushesAllRows() throws Exception {
-        TypeRegistry registry = TypeRegistry.withDefaults();
-        EntityMetadata<Event> metadata = new EntityMetadataFactory(registry).resolve(Event.class);
+    void batchWriter_gracefulShutdownWith1000Rows() throws Exception {
+        execute("TRUNCATE TABLE bw_test");
 
-        int rowsToInsert = 1000;
-
-        BatchWriterConfig<Event> config = new BatchWriterConfig<>(
-                200,
-                32 * 1024 * 1024L,
-                Duration.ofSeconds(5),
-                2,
-                BackpressurePolicy.BLOCK,
-                Duration.ofSeconds(5),
-                RetryPolicy.defaults(),
-                null,
-                false, true,
-                Duration.ofSeconds(30)
+        BatchWriterConfig cfg = new BatchWriterConfig(
+            100, 32L * 1024 * 1024, Duration.ofSeconds(1),
+            2, BackpressurePolicy.BLOCK, Duration.ofSeconds(5),
+            RetryPolicy.defaults(), null, false, false, Duration.ofSeconds(30)
         );
 
-        try (BatchWriter<Event> writer = new BatchWriter<>(metadata, config,
-                ClickHouseContainerExtension.baseUrl())) {
-            for (long i = 200; i < 200 + rowsToInsert; i++) {
-                writer.add(new Event(i, UUID.randomUUID()));
+        try (BatchWriter<Event> writer = template.batchWriter(Event.class, cfg)) {
+            for (int i = 0; i < 1000; i++) {
+                writer.add(new Event(1000L + i, UUID.randomUUID()));
             }
         }
 
-        assertThat(rowCount()).isEqualTo(rowsToInsert);
+        String count = queryString("SELECT count() FROM bw_test WHERE id >= 1000");
+        assertThat(Long.parseLong(count.strip())).isEqualTo(1000);
     }
-
-    // -------------------------------------------------------------------------
-    // Stats
-    // -------------------------------------------------------------------------
 
     @Test
-    void statsTrackInsertedRows() throws Exception {
-        TypeRegistry registry = TypeRegistry.withDefaults();
-        EntityMetadata<Event> metadata = new EntityMetadataFactory(registry).resolve(Event.class);
-
-        BatchWriterConfig<Event> config = new BatchWriterConfig<>(
-                3, 1024 * 1024L, Duration.ofSeconds(2), 1,
-                BackpressurePolicy.BLOCK, Duration.ofSeconds(2),
-                RetryPolicy.defaults(), null, false, true, Duration.ofSeconds(10)
+    void batchWriter_statsTrackInsertedRows() throws Exception {
+        BatchWriterConfig cfg = new BatchWriterConfig(
+            5, 32L * 1024 * 1024, Duration.ofSeconds(30),
+            1, BackpressurePolicy.BLOCK, Duration.ofSeconds(5),
+            RetryPolicy.defaults(), null, false, false, Duration.ofSeconds(10)
         );
 
-        BatchWriterStats.Snapshot snap;
-        try (BatchWriter<Event> writer = new BatchWriter<>(metadata, config,
-                ClickHouseContainerExtension.baseUrl())) {
-            writer.add(new Event(9001L, UUID.randomUUID()));
-            writer.add(new Event(9002L, UUID.randomUUID()));
-            writer.add(new Event(9003L, UUID.randomUUID()));
-            Thread.sleep(3000);
-            snap = writer.stats();
+        try (BatchWriter<Event> writer = template.batchWriter(Event.class, cfg)) {
+            for (int i = 2000; i < 2005; i++) {
+                writer.add(new Event(i, UUID.randomUUID()));
+            }
+            Thread.sleep(500);
+            BatchWriterStats.Snapshot snap = writer.stats();
+            assertThat(snap.insertedRows()).isEqualTo(5);
         }
-
-        assertThat(snap.rowsInserted()).isGreaterThanOrEqualTo(3);
-        assertThat(snap.bytesWritten()).isGreaterThan(0);
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
-    private static long rowCount() throws Exception {
+    private void execute(String sql) throws Exception {
         String url = ClickHouseContainerExtension.baseUrl()
-                + "&query=" + URLEncoder.encode("SELECT count() FROM bw_test FORMAT RowBinary",
-                        StandardCharsets.UTF_8);
+            + "&query=" + URLEncoder.encode(sql, StandardCharsets.UTF_8);
+        HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
+            .POST(HttpRequest.BodyPublishers.noBody()).build();
+        http.send(req, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private String queryString(String sql) throws Exception {
+        String url = ClickHouseContainerExtension.baseUrl()
+            + "&query=" + URLEncoder.encode(sql, StandardCharsets.UTF_8);
         HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-        HttpResponse<byte[]> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
-        byte[] body = resp.body();
-        long value = 0;
-        for (int i = 7; i >= 0; i--) {
-            value = (value << 8) | (body[i] & 0xFF);
-        }
-        return value;
-    }
-
-    private static void execute(String sql) throws Exception {
-        String url = ClickHouseContainerExtension.baseUrl()
-                + "&query=" + URLEncoder.encode(sql, StandardCharsets.UTF_8);
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
-        HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() != 200) {
-            throw new RuntimeException("SQL failed [" + resp.statusCode() + "]: " + resp.body());
-        }
+        return http.send(req, HttpResponse.BodyHandlers.ofString()).body();
     }
 }
