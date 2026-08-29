@@ -4,18 +4,116 @@
   <strong>ClickHouse persistence for Java — done right.</strong>
   <br/><br/>
 
-  ![Build](https://img.shields.io/github/actions/workflow/status/muneebillahi/blinkhouse/ci.yml?branch=main&label=build&style=flat-square)
+  ![Build](https://img.shields.io/github/actions/workflow/status/muneeb-i-khan/BlinkHouse/ci.yml?branch=main&label=build&style=flat-square)
   ![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)
   ![Java](https://img.shields.io/badge/Java-17%2B-orange?style=flat-square)
-  ![Phase](https://img.shields.io/badge/phase-0%20complete-brightgreen?style=flat-square)
-  ![Maven Central](https://img.shields.io/badge/maven--central-not%20yet%20released-lightgrey?style=flat-square)
+  ![Maven Central](https://img.shields.io/maven-central/v/io.github.muneeb-i-khan/blinkhouse-spring-boot-starter?style=flat-square&label=maven-central)
 </div>
 
 ---
 
-BlinkHouse is a ClickHouse-native persistence framework for Java and Spring Boot. It gives you typed entities, high-throughput batch ingestion via the RowBinary wire format, a query API that speaks ClickHouse fluently, and a Spring Data repository layer — without pretending ClickHouse is a relational database.
+BlinkHouse is a ClickHouse-native persistence library for Java and Spring Boot. High-throughput buffered ingest, typed queries, schema management, and Spring Data repositories — without the lies an ORM would tell you.
 
 **It is not an ORM.** ClickHouse has no transactions, no row-level identity, no dirty checking, and no foreign keys. BlinkHouse doesn't fake any of that.
+
+---
+
+## Install
+
+```xml
+<dependency>
+    <groupId>io.github.muneeb-i-khan</groupId>
+    <artifactId>blinkhouse-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+Not on Spring Boot? Use `blinkhouse-core` directly — zero Spring dependencies.
+
+---
+
+## Quick start
+
+**1 — Configure**
+
+```yaml
+clickhouse:
+  url: http://localhost:8123
+  username: default
+  password: ${CH_PASSWORD}
+  database: analytics
+  schema:
+    mode: CREATE_IF_MISSING
+```
+
+**2 — Define an entity**
+
+```java
+@ChTable(
+    name = "page_views",
+    orderBy = {"tenant_id", "ts"},
+    partitionBy = "toYYYYMM(ts)"
+)
+@ChEngine(value = Engine.REPLACING_MERGE_TREE, versionColumn = "ingested_at")
+public record PageView(
+    @ChColumn(type = "UInt32")                int     tenantId,
+    @ChColumn(type = "DateTime64(3,'UTC')")   Instant ts,
+    @ChColumn(type = "LowCardinality(String)") String  country,
+                                              String  url,
+    @ChColumn(defaultExpression = "now64(3)") Instant ingestedAt
+) {}
+```
+
+**3 — Ingest at scale**
+
+```java
+@Service
+public class IngestService {
+
+    private final ChTemplate template;
+
+    public void ingest(List<PageView> views) throws InterruptedException {
+        try (BatchWriter<PageView> writer = template.batchWriter(PageView.class, BatchWriterConfig.defaults())) {
+            for (PageView v : views) writer.add(v);
+        }
+    }
+}
+```
+
+**4 — Query**
+
+```java
+// Spring Data repository
+public interface PageViewRepository extends ClickHouseRepository<PageView, UUID> {
+    Slice<PageView> findByTenantIdAndTsBetween(int tenantId, Instant from, Instant to, Cursor cursor);
+
+    @Query("SELECT toStartOfHour(ts) h, uniq(url) u FROM page_views WHERE tenant_id = :t GROUP BY h ORDER BY h")
+    List<HourlyUniques> hourlyUniques(@Param("t") int tenantId);
+}
+
+// Or use the DSL directly
+List<PageView> views = ChQuery.select("*")
+    .from(TableRef.of("page_views"))
+    .where(col("tenant_id").eq(tenantId))
+    .fetch(template, PageView.class);
+```
+
+---
+
+## Key imports
+
+```java
+import io.blinkhouse.core.template.ChTemplate;
+import io.blinkhouse.core.write.BatchWriter;
+import io.blinkhouse.core.write.BatchWriterConfig;
+import io.blinkhouse.core.annotation.ChTable;
+import io.blinkhouse.core.annotation.ChColumn;
+import io.blinkhouse.core.annotation.ChEngine;
+import io.blinkhouse.core.query.ChQuery;
+import io.blinkhouse.spring.repository.ClickHouseRepository;
+```
+
+The Maven `groupId` is `io.github.muneeb-i-khan`. Java package names inside the JAR are `io.blinkhouse.*`.
 
 ---
 
@@ -23,110 +121,53 @@ BlinkHouse is a ClickHouse-native persistence framework for Java and Spring Boot
 
 | Capability | Detail |
 |---|---|
-| **Typed entities** | `@ChTable`, `@ChColumn`, `@ChEngine` — annotate a Java record, get a mapped entity. |
-| **Spring Data repositories** | `ClickHouseRepository<T, ID>` with `findBy` methods, `@Query` for native SQL, and fragment composition (`XxxRepositoryImpl`). |
-| **High-throughput batch writes** | `BatchWriter` serialises directly to RowBinary. ~2.9M rows/sec on commodity hardware. Buffering, flush triggers, backpressure, retry, and dead-letter callbacks included. |
-| **ClickHouse-native query API** | `PREWHERE`, `FINAL`, `SAMPLE`, `WITH TOTALS`, `LIMIT n BY`, aggregate combinators. First-class citizens, not escape hatches. |
-| **Schema as code** | Generate `CREATE TABLE` DDL from annotations, detect drift against `system.columns`, emit migration scripts for Flyway or Liquibase. Never auto-applies destructive changes. |
-| **Spring Boot starter** | Zero-config auto-wiring, `clickhouse.*` properties, Actuator health indicator, Micrometer metrics, OpenTelemetry spans. |
-| **Core is Spring-free** | `blinkhouse-core` is plain Java. Works from Quarkus, Micronaut, or a plain `main()`. |
+| **BatchWriter\<T\>** | Ring-buffer ingest with three flush triggers: row count, byte size, elapsed time. Exponential backoff retry. Dead-letter dispatch. No silent drops. |
+| **Full type system** | All ClickHouse types covered — geo, AggregateFunction, LowCardinality, Nullable, Array, Map, Tuple. All round-trip tested. |
+| **ChQuery DSL** | FINAL, SAMPLE, PREWHERE, LIMIT n BY, WITH TOTALS, window functions, -Merge combinators, dictGet, geoDistance. ClickHouse-first. |
+| **Spring Data repositories** | Derived query methods, `@Query` native SQL, keyset pagination as primary. Offset pagination works but warns above your threshold. |
+| **Schema management** | NONE / VALIDATE / CREATE_IF_MISSING / UPDATE modes. Destructive changes require two opt-ins. EngineMismatch and OrderByMismatch are never auto-fixed. |
+| **Observability** | Micrometer metrics, OTel tracing, correlatable `query_id` joinable against `system.query_log`. Grafana dashboard JSON included. |
+| **Connection pooling** | Apache HttpClient 5 pool shared across `ChTemplate` and all its `BatchWriter` children. Idle evictor, inactivity validation, full YAML tuning. |
+| **Advanced features** | `@ChMaterializedView`, `@ChDictionary`, `MutationOperations` (ALTER DELETE/UPDATE), `optimize()` for forced merges, GraalVM native-image hints. |
+| **Spring-free core** | `blinkhouse-core` has zero Spring imports. Works from Quarkus, Micronaut, or a plain `main()`. |
 
 ---
 
-## Quick start <sup>(available in v0.1.0)</sup>
+## What it doesn't do
 
-```java
-@ChTable(name = "page_views", engine = @ChEngine(MergeTree.class),
-         orderBy = {"tenant_id", "ts"})
-public record PageView(
-    @ChColumn("tenant_id") int    tenantId,
-    @ChColumn("ts")        Instant ts,
-    @ChColumn("user_id")   UUID    userId,
-    @ChColumn("country")   @LowCardinality String country
-) {}
-```
+These are design decisions, not gaps.
 
-```java
-public interface PageViewRepository extends ClickHouseRepository<PageView, UUID> {
-
-    Slice<PageView> findByTenantIdAndTsBetween(
-            int tenantId, Instant from, Instant to, Cursor c);
-
-    @Query("""
-           SELECT toStartOfHour(ts) h, uniq(user_id) u
-           FROM page_views
-           WHERE tenant_id = :t
-           GROUP BY h ORDER BY h
-           """)
-    List<HourlyUniques> hourlyUniques(@Param("t") int tenantId);
-}
-```
-
-```java
-// Spring Boot — zero extra config needed
-@SpringBootApplication
-@EnableClickHouseRepositories
-public class App { ... }
-```
-
----
-
-## What BlinkHouse is not
-
-Coming from JPA? This table saves you some surprises.
-
-| JPA concept | BlinkHouse answer |
+| Concept | BlinkHouse answer |
 |---|---|
 | `@Transactional` | ClickHouse has no transactions. BlinkHouse won't fake it. |
-| `@OneToMany` / lazy loading | N+1 against a columnar store is catastrophic. Use joins or dictionaries. |
-| `EntityManager` / dirty checking | ClickHouse rows are immutable after insert. |
-| Row-level `UPDATE` / `DELETE` | Exposed only via an explicit `MutationOperations` API — loudly named on purpose. |
-| Offset pagination | Supported but logged as a warning above a configurable threshold. Use keyset/cursor pagination instead. |
-
----
-
-## Project status
-
-**Phase 0 is complete.** Transport decision made, type system verified, Spring Data SPI wired. Core implementation begins in Phase 1.
-
-| Milestone | Status | Summary |
-|---|---|---|
-| Transport bake-off | ✅ Done | Raw HTTP + RowBinary selected. ~2.9M rows/sec. See [ADR-04](docs/adr/ADR-04-transport.md). |
-| Type round-trip (12 types) | ✅ Done | All hard types correct. JSON skipped (internal RowBinary format — tracked). |
-| Spring Data SPI wiring | ✅ Done | `@EnableClickHouseRepositories` + `RepositoryFactoryBean` wire correctly. Fragment composition dispatched through proxy. |
-| CI pipeline | ✅ Done | GitHub Actions: build, integration tests (ClickHouse 24.3 / 24.8 / 25.1 matrix), benchmark compile gate. |
-| Core mapping & read path | 🔜 Phase 1 | `@ChTable`, `ChTemplate`, `RowMapper`, streaming queries. Target: v0.1.0. |
-| Batch write path | 🔜 Phase 2 | `BatchWriter`, RowBinary serialisation, NFR-1 gate in CI. |
-| Schema management | 🔜 Phase 3 | DDL generation, drift detection, migration script output. |
-| Spring Boot starter | 🔜 Phase 4 | Auto-configuration, Actuator, Micrometer, OpenTelemetry. |
+| `@OneToMany` / lazy loading | No relations. Use joins or dictionaries (`dictGet`). |
+| Dirty checking / identity map | ClickHouse rows are immutable after insert. |
+| Silent row-level `UPDATE`/`DELETE` | Exposed only via explicit `MutationOperations` — loudly named on purpose. |
+| Deep offset pagination | Supported but logged as a warning. Use keyset (`Cursor`) instead. |
 
 ---
 
 ## Modules
 
-```
-blinkhouse/
-├── blinkhouse-core/              # Type system, RowBinary I/O, ChTemplate. No Spring.
-├── blinkhouse-spring/            # Repository SPI, Spring Data integration.
-├── blinkhouse-spring-boot-starter/ # Auto-configuration, clickhouse.* properties.
-├── blinkhouse-processor/         # Annotation processor — compile-time metamodel.
-├── blinkhouse-test/              # @ClickHouseTest slice, Testcontainers helpers.
-├── blinkhouse-benchmark/         # JMH suite — NFR-1 write throughput, NFR-2 read overhead.
-└── examples/                     # Runnable examples.
-```
+| Artifact | Use when |
+|---|---|
+| `blinkhouse-spring-boot-starter` | Spring Boot app — pulls in everything |
+| `blinkhouse-core` | Plain Java / Quarkus / Micronaut — zero Spring |
+| `blinkhouse-spring` | Spring without Boot autoconfiguration |
+| `blinkhouse-test` | `@BlinkHouseTest` slice + Testcontainers fixtures |
+| `blinkhouse-processor` | Optional annotation processor for typed metamodel |
 
 ---
 
-## Design principles
+## Compatibility
 
-These are binding constraints, not aspirations.
-
-1. **No lies about semantics.** If ClickHouse can't do it, BlinkHouse won't fake it.
-2. **Batch is the default write path.** Single-row `insert()` is instrumented and logged as a smell.
-3. **Analytics is a first-class query shape.** Aggregations and ClickHouse-specific clauses live in the typed API, not in string escape hatches.
-4. **The escape hatch is always one call away.** Drop to native SQL at any point while keeping the same row mapping and metrics.
-5. **Schema is code, migrations are explicit.** DDL is generated and diffed — never silently applied in production.
-6. **No relational modelling.** Joins are explicit. There are no cascades, no proxies, no `@OneToMany`.
+| | Supported |
+|---|---|
+| Java | 17, 21 |
+| Spring Boot | 3.2, 3.3, 3.4 |
+| ClickHouse server | 24.3, 24.8, 25.1+ |
+| Build tool | Maven 3.9+, Gradle (via Maven Central) |
+| GraalVM native | reflect-config + resource-config included |
 
 ---
 
@@ -134,18 +175,22 @@ These are binding constraints, not aspirations.
 
 ```bash
 # Full build + integration tests (requires Docker)
-./mvnw verify
+mvn verify
 
 # Skip integration tests
-./mvnw verify -DskipITs
+mvn verify -DskipITs
 
-# Checkstyle only
-./mvnw checkstyle:check
+# Release build (requires GPG key + Sonatype credentials)
+mvn clean deploy -P release -DskipTests
 ```
 
-**Requirements:** Java 17+ · Maven 3.9+ · Docker (for integration tests)
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor guide and PR checklist.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide, common traps, and PR checklist.
+---
+
+## Coming from JPA?
+
+Read [docs/05-COMING-FROM-JPA.md](docs/05-COMING-FROM-JPA.md) for a mapping of JPA concepts to their BlinkHouse equivalents (and the ones that simply don't exist).
 
 ---
 
