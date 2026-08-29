@@ -371,6 +371,131 @@ public final class ChTemplate {
     }
 
     /**
+     * Executes {@code ALTER TABLE … DELETE WHERE …} for the given entity class.
+     *
+     * <p>ClickHouse mutations are asynchronous — this method returns as soon as the
+     * server accepts the mutation, not when it completes. Monitor completion via
+     * {@code system.mutations} using the returned mutation ID or poll the table.
+     *
+     * <p>IMPORTANT: ClickHouse mutations rewrite entire parts and are heavy operations.
+     * Prefer designing schemas so rows can be filtered in queries rather than deleted.
+     *
+     * @param <T>         the entity type
+     * @param entityClass the entity class
+     * @param where       the WHERE predicate (must not be null — use {@code Literal.TRUE} to delete all)
+     * @throws ChException on ClickHouse error
+     */
+    public <T> void delete(Class<T> entityClass, io.blinkhouse.core.query.ast.Predicate where)
+            throws ChException {
+        EntityMetadata<T> md = metadataFactory.resolve(entityClass);
+        String table = md.getQualifiedName();
+        BoundStatement bound = SqlRenderer.renderWhere(where);
+        String sql = "ALTER TABLE " + table + " DELETE WHERE " + bound.sql();
+        String queryId = queryIdGenerator.generate();
+        Object span = tracer.startSpan("ch.delete", sql, queryId);
+        long start = System.currentTimeMillis();
+        String outcome = "success";
+        try {
+            executeMutation(sql, bound, queryId);
+        } catch (RuntimeException e) {
+            outcome = "error";
+            tracer.endSpan(span, e);
+            throw e;
+        }
+        tracer.endSpan(span, null);
+        metrics.recordQuery(table, "delete", "none", "delete", outcome,
+                System.currentTimeMillis() - start);
+    }
+
+    /**
+     * Executes {@code ALTER TABLE … UPDATE col = expr, … WHERE …} for the given entity class.
+     *
+     * <p>Like {@link #delete}, the mutation is asynchronous. Column expressions must not
+     * contain user-supplied raw SQL — use the {@link io.blinkhouse.core.query.ast.ParameterRef}
+     * and AST node types to build expressions safely (NFR-6).
+     *
+     * @param <T>         the entity type
+     * @param entityClass the entity class
+     * @param assignments a map of ClickHouse column name → the new value expression
+     * @param where       the WHERE predicate (must not be null)
+     * @throws ChException on ClickHouse error or empty assignments map
+     */
+    public <T> void update(Class<T> entityClass,
+                           java.util.Map<String, io.blinkhouse.core.query.ast.Expression> assignments,
+                           io.blinkhouse.core.query.ast.Predicate where) throws ChException {
+        if (assignments == null || assignments.isEmpty()) {
+            throw new IllegalArgumentException("update() assignments must not be empty");
+        }
+        EntityMetadata<T> md = metadataFactory.resolve(entityClass);
+        String table = md.getQualifiedName();
+
+        // Render each assignment expression, accumulating all parameters
+        java.util.Map<String, Object> allParams = new java.util.LinkedHashMap<>();
+        StringBuilder setClause = new StringBuilder();
+        int idx = 0;
+        for (java.util.Map.Entry<String, io.blinkhouse.core.query.ast.Expression> entry
+                : assignments.entrySet()) {
+            if (idx++ > 0) {
+                setClause.append(", ");
+            }
+            BoundStatement valBound = SqlRenderer.renderExpression(entry.getValue());
+            allParams.putAll(valBound.parameters());
+            setClause.append("`").append(entry.getKey()).append("` = ").append(valBound.sql());
+        }
+
+        BoundStatement whereBound = SqlRenderer.renderWhere(where);
+        allParams.putAll(whereBound.parameters());
+
+        String sql = "ALTER TABLE " + table + " UPDATE " + setClause + " WHERE " + whereBound.sql();
+        BoundStatement fullBound = new BoundStatement(sql, allParams);
+        String queryId = queryIdGenerator.generate();
+        Object span = tracer.startSpan("ch.update", sql, queryId);
+        long start = System.currentTimeMillis();
+        String outcome = "success";
+        try {
+            executeMutation(sql, fullBound, queryId);
+        } catch (RuntimeException e) {
+            outcome = "error";
+            tracer.endSpan(span, e);
+            throw e;
+        }
+        tracer.endSpan(span, null);
+        metrics.recordQuery(table, "update", "none", "update", outcome,
+                System.currentTimeMillis() - start);
+    }
+
+    private void executeMutation(String sql, BoundStatement bound, String queryId)
+            throws ChException {
+        StringBuilder urlBuilder = new StringBuilder(baseUrl)
+                .append("&query=")
+                .append(java.net.URLEncoder.encode(sql, StandardCharsets.UTF_8))
+                .append("&query_id=")
+                .append(java.net.URLEncoder.encode(queryId, StandardCharsets.UTF_8));
+        for (Map.Entry<String, Object> entry : bound.parameters().entrySet()) {
+            urlBuilder.append("&param_").append(entry.getKey()).append('=')
+                    .append(java.net.URLEncoder.encode(
+                            entry.getValue() == null ? "" : entry.getValue().toString(),
+                            StandardCharsets.UTF_8));
+        }
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(urlBuilder.toString()))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> resp;
+        try {
+            resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ChException("HTTP send interrupted", e);
+        } catch (IOException e) {
+            throw ChExceptionTranslator.translateNetworkError(e);
+        }
+        if (resp.statusCode() >= 400) {
+            throw ChExceptionTranslator.translate(resp.body(), resp.statusCode());
+        }
+    }
+
+    /**
      * Returns the base HTTP URL this template connects to.
      *
      * @return the base URL

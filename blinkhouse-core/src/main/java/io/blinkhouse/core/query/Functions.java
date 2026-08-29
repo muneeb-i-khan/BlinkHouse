@@ -635,4 +635,181 @@ public final class Functions {
     public static FunctionCall iPv6StringToNum(Expression expr) {
         return FunctionCall.of("IPv6StringToNum", expr);
     }
+
+    // ── AggregateFunction -Merge combinators ───────────────────────────────────
+
+    /**
+     * {@code uniqMerge(state)} — finalises a partial {@code uniq} aggregate state stored in
+     * an {@code AggregateFunction(uniq, T)} column.
+     *
+     * @param stateExpr expression referencing the aggregate-state column
+     * @return a uniqMerge expression
+     */
+    public static FunctionCall uniqMerge(Expression stateExpr) {
+        return FunctionCall.of("uniqMerge", stateExpr);
+    }
+
+    /**
+     * {@code sumMerge(state)} — finalises a partial {@code sum} aggregate state.
+     *
+     * @param stateExpr expression referencing the aggregate-state column
+     * @return a sumMerge expression
+     */
+    public static FunctionCall sumMerge(Expression stateExpr) {
+        return FunctionCall.of("sumMerge", stateExpr);
+    }
+
+    /**
+     * {@code avgMerge(state)} — finalises a partial {@code avg} aggregate state.
+     *
+     * @param stateExpr expression referencing the aggregate-state column
+     * @return an avgMerge expression
+     */
+    public static FunctionCall avgMerge(Expression stateExpr) {
+        return FunctionCall.of("avgMerge", stateExpr);
+    }
+
+    /**
+     * {@code minMerge(state)} — finalises a partial {@code min} aggregate state.
+     *
+     * @param stateExpr expression referencing the aggregate-state column
+     * @return a minMerge expression
+     */
+    public static FunctionCall minMerge(Expression stateExpr) {
+        return FunctionCall.of("minMerge", stateExpr);
+    }
+
+    /**
+     * {@code maxMerge(state)} — finalises a partial {@code max} aggregate state.
+     *
+     * @param stateExpr expression referencing the aggregate-state column
+     * @return a maxMerge expression
+     */
+    public static FunctionCall maxMerge(Expression stateExpr) {
+        return FunctionCall.of("maxMerge", stateExpr);
+    }
+
+    /**
+     * {@code countMerge(state)} — finalises a partial {@code count} aggregate state.
+     *
+     * @param stateExpr expression referencing the aggregate-state column
+     * @return a countMerge expression
+     */
+    public static FunctionCall countMerge(Expression stateExpr) {
+        return FunctionCall.of("countMerge", stateExpr);
+    }
+
+    /**
+     * {@code quantileMerge(level)(state)} — finalises a partial {@code quantile} state.
+     *
+     * @param level     the quantile level (0..1)
+     * @param stateExpr expression referencing the aggregate-state column
+     * @return a quantileMerge expression
+     */
+    public static FunctionCall quantileMerge(double level, Expression stateExpr) {
+        return FunctionCall.of("quantileMerge(" + level + ")", stateExpr);
+    }
+
+    /**
+     * {@code groupArrayMerge(state)} — finalises a partial {@code groupArray} state.
+     *
+     * @param stateExpr expression referencing the aggregate-state column
+     * @return a groupArrayMerge expression
+     */
+    public static FunctionCall groupArrayMerge(Expression stateExpr) {
+        return FunctionCall.of("groupArrayMerge", stateExpr);
+    }
+
+    // ── Geo functions ──────────────────────────────────────────────────────────
+
+    /**
+     * {@code pointInPolygon(point, polygon)} — returns 1 if the point is inside the polygon.
+     *
+     * @param point   the Point expression
+     * @param polygon the Polygon expression
+     * @return a pointInPolygon expression
+     */
+    public static FunctionCall pointInPolygon(Expression point, Expression polygon) {
+        return FunctionCall.of("pointInPolygon", point, polygon);
+    }
+
+    /**
+     * {@code geoDistance(lon1, lat1, lon2, lat2)} — great-circle distance in metres.
+     *
+     * @param lon1 longitude of the first point
+     * @param lat1 latitude of the first point
+     * @param lon2 longitude of the second point
+     * @param lat2 latitude of the second point
+     * @return a geoDistance expression
+     */
+    public static FunctionCall geoDistance(Expression lon1, Expression lat1,
+                                           Expression lon2, Expression lat2) {
+        return FunctionCall.of("geoDistance", lon1, lat1, lon2, lat2);
+    }
+
+    /**
+     * {@code greatCircleDistance(lon1, lat1, lon2, lat2)} — alias for {@link #geoDistance}.
+     *
+     * @param lon1 longitude of the first point
+     * @param lat1 latitude of the first point
+     * @param lon2 longitude of the second point
+     * @param lat2 latitude of the second point
+     * @return a greatCircleDistance expression
+     */
+    public static FunctionCall greatCircleDistance(Expression lon1, Expression lat1,
+                                                   Expression lon2, Expression lat2) {
+        return FunctionCall.of("greatCircleDistance", lon1, lat1, lon2, lat2);
+    }
+
+    /**
+     * {@code H3GetBaseCell(h3index)} — returns the base cell index for an H3 cell.
+     *
+     * @param h3index the H3 cell index expression
+     * @return an H3GetBaseCell expression
+     */
+    public static FunctionCall h3GetBaseCell(Expression h3index) {
+        return FunctionCall.of("H3GetBaseCell", h3index);
+    }
+
+    /**
+     * {@code geoToH3(lon, lat, resolution)} — converts a geo coordinate to an H3 cell index.
+     *
+     * @param lon        longitude expression
+     * @param lat        latitude expression
+     * @param resolution H3 resolution (0–15) expression
+     * @return a geoToH3 expression
+     */
+    public static FunctionCall geoToH3(Expression lon, Expression lat, Expression resolution) {
+        return FunctionCall.of("geoToH3", lon, lat, resolution);
+    }
+
+    /**
+     * {@code dictGet(dictName, attr, key)} — looks up an attribute in a ClickHouse dictionary.
+     *
+     * <p>The dictionary name must be a compile-time constant passed as a
+     * {@link io.blinkhouse.core.query.ast.RawFragment}; the key is a single expression
+     * (for FLAT/HASHED layouts).
+     *
+     * @param dictName expression for the dictionary name (use {@code RawFragment.of("'my_dict'")})
+     * @param attrName expression for the attribute name (use {@code RawFragment.of("'col'")})
+     * @param key      the key expression
+     * @return a dictGet expression
+     */
+    public static FunctionCall dictGet(Expression dictName, Expression attrName, Expression key) {
+        return FunctionCall.of("dictGet", dictName, attrName, key);
+    }
+
+    /**
+     * {@code dictGetOrDefault(dictName, attr, key, defaultValue)} — dictionary lookup with a fallback.
+     *
+     * @param dictName     expression for the dictionary name
+     * @param attrName     expression for the attribute name
+     * @param key          the key expression
+     * @param defaultValue the value to return if the key is not found
+     * @return a dictGetOrDefault expression
+     */
+    public static FunctionCall dictGetOrDefault(Expression dictName, Expression attrName,
+                                                Expression key, Expression defaultValue) {
+        return FunctionCall.of("dictGetOrDefault", dictName, attrName, key, defaultValue);
+    }
 }
