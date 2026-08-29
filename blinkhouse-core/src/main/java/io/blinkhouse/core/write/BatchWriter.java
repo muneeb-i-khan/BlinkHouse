@@ -4,6 +4,8 @@ import io.blinkhouse.core.exception.ChBufferFullException;
 import io.blinkhouse.core.exception.ChException;
 import io.blinkhouse.core.exception.ChExceptionTranslator;
 import io.blinkhouse.core.metadata.EntityMetadata;
+import io.blinkhouse.core.observability.ChMetrics;
+import io.blinkhouse.core.observability.NoopChMetrics;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -50,18 +52,33 @@ public final class BatchWriter<T> implements AutoCloseable {
     private final BatchWriterStats stats = new BatchWriterStats();
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Object flushSignal = new Object();
+    private final ChMetrics metrics;
 
     /**
-     * Constructs a batch writer.
+     * Constructs a batch writer with no-op metrics.
      *
      * @param metadata entity metadata for serialisation
      * @param config   batch writer configuration
      * @param baseUrl  ClickHouse HTTP base URL including credentials
      */
     public BatchWriter(EntityMetadata<T> metadata, BatchWriterConfig config, String baseUrl) {
+        this(metadata, config, baseUrl, NoopChMetrics.INSTANCE);
+    }
+
+    /**
+     * Constructs a batch writer with metrics instrumentation.
+     *
+     * @param metadata entity metadata for serialisation
+     * @param config   batch writer configuration
+     * @param baseUrl  ClickHouse HTTP base URL including credentials
+     * @param metrics  metrics implementation; {@code null} falls back to no-op
+     */
+    public BatchWriter(EntityMetadata<T> metadata, BatchWriterConfig config,
+                       String baseUrl, ChMetrics metrics) {
         this.metadata = metadata;
         this.config = config;
         this.baseUrl = baseUrl;
+        this.metrics = metrics != null ? metrics : NoopChMetrics.INSTANCE;
         this.http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
@@ -204,16 +221,22 @@ public final class BatchWriter<T> implements AutoCloseable {
         if (batch.isEmpty()) {
             return;
         }
+        metrics.recordBufferOccupancy(metadata.getTable(), buffer.size(), -1L);
 
         int attempt = 0;
+        long start = System.currentTimeMillis();
         while (true) {
             try {
-                sendBatch(batch);
+                long bytesBefore = sendBatchAndGetBytes(batch);
                 stats.recordInserted(batch.size(), 0);
+                metrics.recordBatch(metadata.getTable(), batch.size(), bytesBefore,
+                        "success", System.currentTimeMillis() - start);
                 return;
             } catch (ChException ex) {
                 ErrorClassifier.Classification classification = ErrorClassifier.classify(ex);
                 if (classification == ErrorClassifier.Classification.TERMINAL || !config.retry().hasNextAttempt(attempt)) {
+                    metrics.recordBatch(metadata.getTable(), batch.size(), 0L,
+                            "error", System.currentTimeMillis() - start);
                     deadLetter(batch, ex, attempt + 1);
                     return;
                 }
@@ -232,6 +255,8 @@ public final class BatchWriter<T> implements AutoCloseable {
                         Thread.sleep(delay.toMillis());
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
+                        metrics.recordBatch(metadata.getTable(), batch.size(), 0L,
+                                "error", System.currentTimeMillis() - start);
                         deadLetter(batch, ex, attempt + 1);
                         return;
                     }
@@ -240,6 +265,8 @@ public final class BatchWriter<T> implements AutoCloseable {
             } catch (IOException ex) {
                 ChException chEx = ChExceptionTranslator.translateNetworkError(ex);
                 if (!config.retry().hasNextAttempt(attempt)) {
+                    metrics.recordBatch(metadata.getTable(), batch.size(), 0L,
+                            "error", System.currentTimeMillis() - start);
                     deadLetter(batch, chEx, attempt + 1);
                     return;
                 }
@@ -249,7 +276,7 @@ public final class BatchWriter<T> implements AutoCloseable {
         }
     }
 
-    private void sendBatch(List<T> batch) throws ChException, IOException {
+    private long sendBatchAndGetBytes(List<T> batch) throws ChException, IOException {
         ByteArrayOutputStream buf = new ByteArrayOutputStream(batch.size() * 64);
         RowBinaryWriter<T> writer = new RowBinaryWriter<>(metadata, buf);
         try {
@@ -286,6 +313,7 @@ public final class BatchWriter<T> implements AutoCloseable {
         if (resp.statusCode() >= 400) {
             throw ChExceptionTranslator.translate(resp.body(), resp.statusCode());
         }
+        return body.length;
     }
 
     @SuppressWarnings("unchecked")
@@ -293,6 +321,7 @@ public final class BatchWriter<T> implements AutoCloseable {
         LOG.error("Dead-lettering {} rows for {} after {} attempts: {}",
             batch.size(), metadata.getTable(), attempts, ex.getMessage());
         stats.recordDeadLettered(batch.size());
+        metrics.recordDeadLetter(metadata.getTable(), batch.size());
         if (config.failureHandler() != null) {
             ((BatchFailureHandler<T>) config.failureHandler()).onFailure(batch, ex, attempts);
         }

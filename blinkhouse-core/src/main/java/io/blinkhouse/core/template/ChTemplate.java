@@ -2,25 +2,40 @@ package io.blinkhouse.core.template;
 
 import io.blinkhouse.core.exception.ChException;
 import io.blinkhouse.core.exception.ChExceptionTranslator;
+import io.blinkhouse.core.mapping.RowMapper;
 import io.blinkhouse.core.metadata.EntityMetadata;
 import io.blinkhouse.core.metadata.EntityMetadataFactory;
+import io.blinkhouse.core.observability.ChMetrics;
+import io.blinkhouse.core.observability.ChTracer;
+import io.blinkhouse.core.observability.NoopChMetrics;
+import io.blinkhouse.core.observability.NoopChTracer;
+import io.blinkhouse.core.observability.QueryIdGenerator;
+import io.blinkhouse.core.query.BoundStatement;
+import io.blinkhouse.core.query.SqlRenderer;
+import io.blinkhouse.core.query.ast.SelectStatement;
 import io.blinkhouse.core.type.TypeRegistry;
 import io.blinkhouse.core.write.BatchWriter;
 import io.blinkhouse.core.write.BatchWriterConfig;
 import io.blinkhouse.core.write.RowBinaryWriter;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +44,10 @@ import org.slf4j.LoggerFactory;
  *
  * <p>Thread-safe and stateless with respect to query execution.
  * Use the {@link Builder} to construct instances.
+ *
+ * <p>Observability is pluggable via {@link ChMetrics}, {@link ChTracer}, and
+ * {@link QueryIdGenerator}. Defaults to no-op implementations so that
+ * {@code blinkhouse-core} has zero Micrometer/OTel dependencies.
  */
 public final class ChTemplate {
 
@@ -38,6 +57,9 @@ public final class ChTemplate {
     private final String baseUrl;
     private final EntityMetadataFactory metadataFactory;
     private final HttpClient http;
+    private final ChMetrics metrics;
+    private final ChTracer tracer;
+    private final QueryIdGenerator queryIdGenerator;
     private final Map<String, LongAdder> singleRowCounters = new ConcurrentHashMap<>();
     private final Map<String, Long> lastWarnTime = new ConcurrentHashMap<>();
 
@@ -47,6 +69,9 @@ public final class ChTemplate {
         this.http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
+        this.metrics = builder.metrics;
+        this.tracer = builder.tracer;
+        this.queryIdGenerator = builder.queryIdGenerator;
     }
 
     /**
@@ -80,7 +105,22 @@ public final class ChTemplate {
      */
     public <T> void insert(Class<T> entityClass, Collection<T> rows) throws ChException {
         EntityMetadata<T> md = metadataFactory.resolve(entityClass);
-        sendInsert(md, rows);
+        String table = md.getQualifiedName();
+        long start = System.currentTimeMillis();
+        String queryId = queryIdGenerator.generate();
+        String sql = "INSERT INTO " + table + " FORMAT RowBinary";
+        Object span = tracer.startSpan("ch.insert", sql, queryId);
+        String outcome = "success";
+        try {
+            sendInsert(md, rows, queryId);
+        } catch (RuntimeException e) {
+            outcome = "error";
+            tracer.endSpan(span, e);
+            throw e;
+        }
+        tracer.endSpan(span, null);
+        metrics.recordQuery(table, "insert", "none", "insert", outcome,
+                System.currentTimeMillis() - start);
     }
 
     /**
@@ -107,7 +147,8 @@ public final class ChTemplate {
             lastWarnTime.put(key, now);
             LOG.warn("Anti-pattern: single-row insert into {} (use batchWriter for production)", key);
         }
-        sendInsert(md, Collections.singletonList(entity));
+        metrics.recordSingleRowInsert(key);
+        sendInsert(md, Collections.singletonList(entity), queryIdGenerator.generate());
     }
 
     /**
@@ -131,7 +172,7 @@ public final class ChTemplate {
      */
     public <T> BatchWriter<T> batchWriter(Class<T> entityClass, BatchWriterConfig config) {
         EntityMetadata<T> md = metadataFactory.resolve(entityClass);
-        return new BatchWriter<>(md, config, baseUrl);
+        return new BatchWriter<>(md, config, baseUrl, metrics);
     }
 
     /**
@@ -158,9 +199,30 @@ public final class ChTemplate {
      * @return list of results, never {@code null}
      * @throws ChException on ClickHouse error or mapping failure
      */
-    public <T> java.util.List<T> queryForList(Class<T> resultType, String sql)
+    public <T> List<T> queryForList(Class<T> resultType, String sql) throws ChException {
+        String queryId = queryIdGenerator.generate();
+        Object span = tracer.startSpan("ch.select", sql, queryId);
+        long start = System.currentTimeMillis();
+        String outcome = "success";
+        try {
+            List<T> result = executeQueryForList(resultType, sql, queryId);
+            tracer.endSpan(span, null);
+            return result;
+        } catch (RuntimeException e) {
+            outcome = "error";
+            tracer.endSpan(span, e);
+            throw e;
+        } finally {
+            metrics.recordQuery("unknown", "select", "none", "queryForList", outcome,
+                    System.currentTimeMillis() - start);
+        }
+    }
+
+    private <T> List<T> executeQueryForList(Class<T> resultType, String sql, String queryId)
             throws ChException {
-        String url = baseUrl + "&query=" + java.net.URLEncoder.encode(sql, StandardCharsets.UTF_8);
+        String url = baseUrl
+                + "&query=" + URLEncoder.encode(sql, StandardCharsets.UTF_8)
+                + "&query_id=" + URLEncoder.encode(queryId, StandardCharsets.UTF_8);
         HttpRequest req = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .GET()
@@ -184,8 +246,8 @@ public final class ChTemplate {
     }
 
     @SuppressWarnings("unchecked")
-    private <T> java.util.List<T> parseTsvResponse(String body, Class<T> resultType) {
-        java.util.List<T> results = new java.util.ArrayList<>();
+    private <T> List<T> parseTsvResponse(String body, Class<T> resultType) {
+        List<T> results = new ArrayList<>();
         if (body == null || body.isBlank()) {
             return results;
         }
@@ -213,8 +275,8 @@ public final class ChTemplate {
     }
 
     /**
-     * Executes a typed query built from a {@link io.blinkhouse.core.query.ast.SelectStatement}
-     * and maps each result row via the supplied {@link io.blinkhouse.core.mapping.RowMapper}.
+     * Executes a typed query built from a {@link SelectStatement}
+     * and maps each result row via the supplied {@link RowMapper}.
      *
      * <p>The statement is rendered to parameterised SQL; parameters are appended as
      * ClickHouse query-string settings ({@code &param_name=value}).
@@ -225,17 +287,38 @@ public final class ChTemplate {
      * @return list of mapped results, never {@code null}
      * @throws ChException on ClickHouse error or mapping failure
      */
-    public <T> java.util.List<T> query(
-            io.blinkhouse.core.query.ast.SelectStatement statement,
-            io.blinkhouse.core.mapping.RowMapper<T> mapper) throws ChException {
-        io.blinkhouse.core.query.BoundStatement bound =
-                io.blinkhouse.core.query.SqlRenderer.render(statement);
+    public <T> List<T> query(SelectStatement statement, RowMapper<T> mapper) throws ChException {
+        BoundStatement bound = SqlRenderer.render(statement);
+        String queryId = queryIdGenerator.generate();
+        // SQL in spans is parameterised — values never attached (NFR-6)
+        Object span = tracer.startSpan("ch.select", bound.sql(), queryId);
+        long start = System.currentTimeMillis();
+        String table = statement.from() != null ? statement.from().qualifiedName() : "unknown";
+        String outcome = "success";
+        try {
+            List<T> result = executeQuery(bound, queryId, mapper);
+            tracer.endSpan(span, null);
+            return result;
+        } catch (RuntimeException e) {
+            outcome = "error";
+            tracer.endSpan(span, e);
+            throw e;
+        } finally {
+            metrics.recordQuery(table, "select", "none", "query", outcome,
+                    System.currentTimeMillis() - start);
+        }
+    }
+
+    private <T> List<T> executeQuery(BoundStatement bound, String queryId, RowMapper<T> mapper)
+            throws ChException {
         StringBuilder urlBuilder = new StringBuilder(baseUrl)
                 .append("&query=")
-                .append(java.net.URLEncoder.encode(bound.sql(), StandardCharsets.UTF_8));
-        for (java.util.Map.Entry<String, Object> entry : bound.parameters().entrySet()) {
+                .append(URLEncoder.encode(bound.sql(), StandardCharsets.UTF_8))
+                .append("&query_id=")
+                .append(URLEncoder.encode(queryId, StandardCharsets.UTF_8));
+        for (Map.Entry<String, Object> entry : bound.parameters().entrySet()) {
             urlBuilder.append("&param_").append(entry.getKey()).append('=')
-                    .append(java.net.URLEncoder.encode(
+                    .append(URLEncoder.encode(
                             entry.getValue() == null ? "" : entry.getValue().toString(),
                             StandardCharsets.UTF_8));
         }
@@ -262,9 +345,9 @@ public final class ChTemplate {
         return parseTsvWithHeadersResponse(resp.body(), mapper);
     }
 
-    private <T> java.util.List<T> parseTsvWithHeadersResponse(
-            String body, io.blinkhouse.core.mapping.RowMapper<T> mapper) throws ChException {
-        java.util.List<T> results = new java.util.ArrayList<>();
+    private <T> List<T> parseTsvWithHeadersResponse(String body, RowMapper<T> mapper)
+            throws ChException {
+        List<T> results = new ArrayList<>();
         if (body == null || body.isBlank()) {
             return results;
         }
@@ -278,7 +361,7 @@ public final class ChTemplate {
                 continue;
             }
             String[] cols = lines[i].split("\t", -1);
-            java.util.Map<String, String> row = new java.util.LinkedHashMap<>();
+            Map<String, String> row = new LinkedHashMap<>();
             for (int c = 0; c < headers.length; c++) {
                 row.put(headers[c], c < cols.length ? cols[c] : "");
             }
@@ -296,7 +379,17 @@ public final class ChTemplate {
         return baseUrl;
     }
 
-    private <T> void sendInsert(EntityMetadata<T> md, Collection<T> rows) throws ChException {
+    /**
+     * Returns the {@link ChMetrics} instance wired into this template.
+     *
+     * @return the metrics implementation (never {@code null})
+     */
+    public ChMetrics getMetrics() {
+        return metrics;
+    }
+
+    private <T> void sendInsert(EntityMetadata<T> md, Collection<T> rows, String queryId)
+            throws ChException {
         ByteArrayOutputStream buf = new ByteArrayOutputStream(rows.size() * 64);
         RowBinaryWriter<T> writer = new RowBinaryWriter<>(md, buf);
         try {
@@ -307,7 +400,9 @@ public final class ChTemplate {
         }
 
         String query = writer.buildInsertSql();
-        String url = baseUrl + "&query=" + java.net.URLEncoder.encode(query, StandardCharsets.UTF_8);
+        String url = baseUrl
+                + "&query=" + URLEncoder.encode(query, StandardCharsets.UTF_8)
+                + "&query_id=" + URLEncoder.encode(queryId, StandardCharsets.UTF_8);
         byte[] body = buf.toByteArray();
 
         HttpRequest req = HttpRequest.newBuilder()
@@ -342,6 +437,9 @@ public final class ChTemplate {
         private String password;
         private String database;
         private TypeRegistry registry = TypeRegistry.withDefaults();
+        private ChMetrics metrics = NoopChMetrics.INSTANCE;
+        private ChTracer tracer = NoopChTracer.INSTANCE;
+        private QueryIdGenerator queryIdGenerator = new QueryIdGenerator();
 
         private Builder(String baseUrl) {
             this.baseUrl = baseUrl;
@@ -395,6 +493,39 @@ public final class ChTemplate {
         }
 
         /**
+         * Sets the metrics implementation. Defaults to {@link NoopChMetrics#INSTANCE}.
+         *
+         * @param metrics the metrics implementation
+         * @return this builder
+         */
+        public Builder metrics(ChMetrics metrics) {
+            this.metrics = metrics != null ? metrics : NoopChMetrics.INSTANCE;
+            return this;
+        }
+
+        /**
+         * Sets the tracer implementation. Defaults to {@link NoopChTracer#INSTANCE}.
+         *
+         * @param tracer the tracer implementation
+         * @return this builder
+         */
+        public Builder tracer(ChTracer tracer) {
+            this.tracer = tracer != null ? tracer : NoopChTracer.INSTANCE;
+            return this;
+        }
+
+        /**
+         * Sets the query ID generator. Defaults to a UUID-based generator.
+         *
+         * @param generator the query ID generator
+         * @return this builder
+         */
+        public Builder queryIdGenerator(QueryIdGenerator generator) {
+            this.queryIdGenerator = generator != null ? generator : new QueryIdGenerator();
+            return this;
+        }
+
+        /**
          * Builds the {@link ChTemplate}.
          *
          * @return a new, thread-safe template instance
@@ -414,7 +545,6 @@ public final class ChTemplate {
                 if (database != null) {
                     sb.append("database=").append(database).append("&");
                 }
-                // trim trailing '&' or '?'
                 String composed = sb.toString();
                 if (composed.endsWith("&") || composed.endsWith("?")) {
                     composed = composed.substring(0, composed.length() - 1);
