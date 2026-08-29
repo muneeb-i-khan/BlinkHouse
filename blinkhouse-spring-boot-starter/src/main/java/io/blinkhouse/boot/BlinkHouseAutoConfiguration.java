@@ -1,5 +1,6 @@
 package io.blinkhouse.boot;
 
+import io.blinkhouse.core.connection.ChConnectionPoolConfig;
 import io.blinkhouse.core.observability.ChMetrics;
 import io.blinkhouse.core.observability.ChTracer;
 import io.blinkhouse.core.observability.NoopChMetrics;
@@ -89,11 +90,22 @@ public class BlinkHouseAutoConfiguration {
                                  QueryIdGenerator queryIdGenerator,
                                  @Autowired(required = false) ChMetrics metrics,
                                  @Autowired(required = false) ChTracer tracer) {
+        BlinkHouseProperties.ConnectionPoolProperties pp = properties.getPool();
+        ChConnectionPoolConfig poolConfig = ChConnectionPoolConfig.builder()
+            .maxTotal(pp.getMaxTotal())
+            .maxPerRoute(pp.getMaxPerRoute())
+            .connectTimeout(pp.getConnectTimeout())
+            .socketTimeout(pp.getSocketTimeout())
+            .idleEvictAfter(pp.getIdleEvictAfter())
+            .evictorInterval(pp.getEvictorInterval())
+            .validateAfterInactivity(pp.getValidateAfterInactivity())
+            .build();
         return ChTemplate.builder(properties.buildBaseUrl())
             .registry(registry)
             .queryIdGenerator(queryIdGenerator)
             .metrics(metrics != null ? metrics : NoopChMetrics.INSTANCE)
             .tracer(tracer != null ? tracer : NoopChTracer.INSTANCE)
+            .pool(poolConfig)
             .build();
     }
 

@@ -8,10 +8,7 @@ import io.blinkhouse.core.observability.ChMetrics;
 import io.blinkhouse.core.observability.NoopChMetrics;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,6 +19,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.apache.hc.client5.http.classic.methods.HttpPost;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,7 +47,7 @@ public final class BatchWriter<T> implements AutoCloseable {
     private final EntityMetadata<T> metadata;
     private final BatchWriterConfig config;
     private final String baseUrl;
-    private final HttpClient http;
+    private final CloseableHttpClient http;
     private final BlockingQueue<T> buffer;
     private final ExecutorService flusherPool;
     private final ScheduledExecutorService timerPool;
@@ -55,33 +57,43 @@ public final class BatchWriter<T> implements AutoCloseable {
     private final ChMetrics metrics;
 
     /**
-     * Constructs a batch writer with no-op metrics.
+     * Constructs a batch writer with its own default connection pool and no-op metrics.
+     *
+     * <p>Convenience constructor for tests and standalone use without a parent
+     * {@link io.blinkhouse.core.template.ChTemplate}. For production use, prefer
+     * {@link io.blinkhouse.core.template.ChTemplate#batchWriter(Class)} so that the
+     * batch writer shares the template's connection pool.
      *
      * @param metadata entity metadata for serialisation
      * @param config   batch writer configuration
      * @param baseUrl  ClickHouse HTTP base URL including credentials
      */
     public BatchWriter(EntityMetadata<T> metadata, BatchWriterConfig config, String baseUrl) {
-        this(metadata, config, baseUrl, NoopChMetrics.INSTANCE);
+        this(metadata, config, baseUrl,
+            io.blinkhouse.core.connection.ChHttpClientFactory.create(
+                io.blinkhouse.core.connection.ChConnectionPoolConfig.defaults()),
+            NoopChMetrics.INSTANCE);
     }
 
     /**
-     * Constructs a batch writer with metrics instrumentation.
+     * Constructs a batch writer that shares the given pooled HTTP client.
+     *
+     * <p>The HTTP client is owned and closed by the parent
+     * {@link io.blinkhouse.core.template.ChTemplate} — do NOT close it here.
      *
      * @param metadata entity metadata for serialisation
      * @param config   batch writer configuration
      * @param baseUrl  ClickHouse HTTP base URL including credentials
+     * @param http     shared, pooled HTTP client from the parent ChTemplate
      * @param metrics  metrics implementation; {@code null} falls back to no-op
      */
     public BatchWriter(EntityMetadata<T> metadata, BatchWriterConfig config,
-                       String baseUrl, ChMetrics metrics) {
+                       String baseUrl, CloseableHttpClient http, ChMetrics metrics) {
         this.metadata = metadata;
         this.config = config;
         this.baseUrl = baseUrl;
         this.metrics = metrics != null ? metrics : NoopChMetrics.INSTANCE;
-        this.http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
+        this.http = http;
         this.buffer = new ArrayBlockingQueue<>(config.maxRows() * 2);
 
         this.flusherPool = Executors.newFixedThreadPool(config.flusherThreads(), r -> {
@@ -263,7 +275,9 @@ public final class BatchWriter<T> implements AutoCloseable {
                 }
                 attempt++;
             } catch (IOException ex) {
-                ChException chEx = ChExceptionTranslator.translateNetworkError(ex);
+                ChException chEx = ex.getCause() instanceof ChException
+                    ? (ChException) ex.getCause()
+                    : ChExceptionTranslator.translateNetworkError(ex);
                 if (!config.retry().hasNextAttempt(attempt)) {
                     metrics.recordBatch(metadata.getTable(), batch.size(), 0L,
                             "error", System.currentTimeMillis() - start);
@@ -287,7 +301,8 @@ public final class BatchWriter<T> implements AutoCloseable {
         }
 
         String query = writer.buildInsertSql();
-        String url = baseUrl + "&query=" + java.net.URLEncoder.encode(query, java.nio.charset.StandardCharsets.UTF_8);
+        String url = baseUrl + "&query="
+            + java.net.URLEncoder.encode(query, StandardCharsets.UTF_8);
         if (config.asyncInsert()) {
             url += "&async_insert=1";
             if (config.waitForAsyncInsert()) {
@@ -296,23 +311,17 @@ public final class BatchWriter<T> implements AutoCloseable {
         }
 
         byte[] body = buf.toByteArray();
-        HttpRequest req = HttpRequest.newBuilder()
-            .uri(URI.create(url))
-            .header("Content-Type", "application/octet-stream")
-            .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-            .build();
+        HttpPost req = new HttpPost(url);
+        req.setEntity(new ByteArrayEntity(body, ContentType.APPLICATION_OCTET_STREAM));
 
-        HttpResponse<String> resp;
-        try {
-            resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ChException("HTTP send interrupted", e);
-        }
-
-        if (resp.statusCode() >= 400) {
-            throw ChExceptionTranslator.translate(resp.body(), resp.statusCode());
-        }
+        http.execute(req, response -> {
+            String respBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            if (response.getCode() >= 400) {
+                ChException ex = ChExceptionTranslator.translate(respBody, response.getCode());
+                throw new IOException("__ch__:" + ex.getMessage(), ex);
+            }
+            return null;
+        });
         return body.length;
     }
 
