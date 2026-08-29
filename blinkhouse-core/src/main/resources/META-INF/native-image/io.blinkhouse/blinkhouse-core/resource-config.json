@@ -1,0 +1,10 @@
+{
+  "resources": {
+    "includes": [
+      {
+        "pattern": "\\Qio/blinkhouse/core/\\E.*\\.class$"
+      }
+    ]
+  },
+  "bundles": []
+}

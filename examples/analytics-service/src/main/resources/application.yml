@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: analytics-service
+
+blinkhouse:
+  url: "http://localhost:8123"
+  username: default
+  password: ""
+  database: analytics
+  schema:
+    mode: CREATE_IF_MISSING
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  level:
+    io.blinkhouse: INFO

@@ -1,0 +1,12 @@
+# Global owner — review required on all changes
+* @muneeb-i-khan
+
+# Core engine
+/blinkhouse-core/ @muneeb-i-khan
+
+# Spring integration
+/blinkhouse-spring/ @muneeb-i-khan
+/blinkhouse-spring-boot-starter/ @muneeb-i-khan
+
+# Docs
+/docs/ @muneeb-i-khan
