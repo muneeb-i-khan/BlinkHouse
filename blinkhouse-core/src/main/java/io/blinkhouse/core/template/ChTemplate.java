@@ -213,6 +213,81 @@ public final class ChTemplate {
     }
 
     /**
+     * Executes a typed query built from a {@link io.blinkhouse.core.query.ast.SelectStatement}
+     * and maps each result row via the supplied {@link io.blinkhouse.core.mapping.RowMapper}.
+     *
+     * <p>The statement is rendered to parameterised SQL; parameters are appended as
+     * ClickHouse query-string settings ({@code &param_name=value}).
+     *
+     * @param <T>       the result element type
+     * @param statement the SELECT statement to execute
+     * @param mapper    the row mapper
+     * @return list of mapped results, never {@code null}
+     * @throws ChException on ClickHouse error or mapping failure
+     */
+    public <T> java.util.List<T> query(
+            io.blinkhouse.core.query.ast.SelectStatement statement,
+            io.blinkhouse.core.mapping.RowMapper<T> mapper) throws ChException {
+        io.blinkhouse.core.query.BoundStatement bound =
+                io.blinkhouse.core.query.SqlRenderer.render(statement);
+        StringBuilder urlBuilder = new StringBuilder(baseUrl)
+                .append("&query=")
+                .append(java.net.URLEncoder.encode(bound.sql(), StandardCharsets.UTF_8));
+        for (java.util.Map.Entry<String, Object> entry : bound.parameters().entrySet()) {
+            urlBuilder.append("&param_").append(entry.getKey()).append('=')
+                    .append(java.net.URLEncoder.encode(
+                            entry.getValue() == null ? "" : entry.getValue().toString(),
+                            StandardCharsets.UTF_8));
+        }
+
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(urlBuilder.toString()))
+                .GET()
+                .build();
+
+        HttpResponse<String> resp;
+        try {
+            resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ChException("HTTP send interrupted", e);
+        } catch (IOException e) {
+            throw ChExceptionTranslator.translateNetworkError(e);
+        }
+
+        if (resp.statusCode() >= 400) {
+            throw ChExceptionTranslator.translate(resp.body(), resp.statusCode());
+        }
+
+        return parseTsvWithHeadersResponse(resp.body(), mapper);
+    }
+
+    private <T> java.util.List<T> parseTsvWithHeadersResponse(
+            String body, io.blinkhouse.core.mapping.RowMapper<T> mapper) throws ChException {
+        java.util.List<T> results = new java.util.ArrayList<>();
+        if (body == null || body.isBlank()) {
+            return results;
+        }
+        String[] lines = body.split("\n");
+        if (lines.length < 2) {
+            return results;
+        }
+        String[] headers = lines[0].split("\t", -1);
+        for (int i = 1; i < lines.length; i++) {
+            if (lines[i].isBlank()) {
+                continue;
+            }
+            String[] cols = lines[i].split("\t", -1);
+            java.util.Map<String, String> row = new java.util.LinkedHashMap<>();
+            for (int c = 0; c < headers.length; c++) {
+                row.put(headers[c], c < cols.length ? cols[c] : "");
+            }
+            results.add(mapper.mapRow(row));
+        }
+        return results;
+    }
+
+    /**
      * Returns the base HTTP URL this template connects to.
      *
      * @return the base URL
