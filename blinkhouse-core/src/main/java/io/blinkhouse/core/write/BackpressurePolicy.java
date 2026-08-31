@@ -1,7 +1,7 @@
 package io.blinkhouse.core.write;
 
 /**
- * Policy applied when the {@link BatchWriter} ring buffer is full.
+ * Policy applied when the {@link BatchWriter} buffer is full.
  */
 public enum BackpressurePolicy {
 

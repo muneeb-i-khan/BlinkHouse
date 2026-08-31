@@ -123,7 +123,7 @@ The Maven `groupId` is `io.github.muneeb-i-khan`. Java package names inside the 
 
 | Capability | Detail |
 |---|---|
-| **BatchWriter\<T\>** | Ring-buffer ingest with three flush triggers: row count, byte size, elapsed time. Exponential backoff retry. Dead-letter dispatch. No silent drops. |
+| **BatchWriter\<T\>** | Bounded-queue ingest with three flush triggers: row count, byte size, elapsed time. Exponential backoff retry. Dead-letter dispatch. No silent drops. |
 | **Full type system** | All ClickHouse types covered — geo, AggregateFunction, LowCardinality, Nullable, Array, Map, Tuple. All round-trip tested. |
 | **ChQuery DSL** | FINAL, SAMPLE, PREWHERE, LIMIT n BY, WITH TOTALS, window functions, -Merge combinators, dictGet, geoDistance. ClickHouse-first. |
 | **Spring Data repositories** | Derived query methods, `@Query` native SQL, keyset pagination as primary. Offset pagination works but warns above your threshold. |

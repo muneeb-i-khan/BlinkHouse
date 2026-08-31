@@ -9,7 +9,7 @@
  * delivered to the {@code BatchFailureHandler} (dead-letter callback). NFR-7.
  *
  * <ul>
- *   <li>{@code BatchWriter} — MPSC ring buffer, flush triggers, retry, drain-on-shutdown</li>
+ *   <li>{@code BatchWriter} — bounded MPSC queue, flush triggers, retry, drain-on-shutdown</li>
  *   <li>{@code BatchWriterConfig} — maxRows, maxBytes, flushInterval, backpressure, retry, drainTimeout</li>
  *   <li>{@code BackpressurePolicy} — {@code BLOCK} / {@code DROP_OLDEST} / {@code FAIL}</li>
  *   <li>{@code RetryPolicy} — exponential backoff with jitter, max attempts</li>

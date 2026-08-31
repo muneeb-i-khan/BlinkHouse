@@ -25,7 +25,7 @@ import java.time.Duration;
  * @param maxBytes           flush when serialised data reaches this many bytes
  * @param flushInterval      flush at least this often regardless of row/byte count
  * @param flusherThreads     number of background flusher threads
- * @param backpressure       what to do when the ring buffer is full
+ * @param backpressure       what to do when the buffer is full
  * @param acquireTimeout     how long a BLOCK-mode add() may wait before timing out
  * @param retry              retry policy for failed flushes
  * @param failureHandler     dead-letter callback; {@code null} means silently drop

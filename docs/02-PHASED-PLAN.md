@@ -108,7 +108,7 @@ List<PageView> rows = template.query(
 ### Build
 1. [x] **Columnar serialisation:** `RowBinaryWriter` — serialise a `List<T>` directly into ClickHouse's binary format via the type handlers. **No per-row `PreparedStatement`.**
 2. [x] **`insert(List<T>)`** on `ChTemplate` — synchronous bulk path.
-3. [x] **`BatchWriter<T>`:** bounded ring buffer, flush triggers (row count / byte size / interval), background flusher threads, `close()` drain.
+3. [x] **`BatchWriter<T>`:** bounded queue (`ArrayBlockingQueue`), flush triggers (row count / byte size / interval), background flusher threads, `close()` drain.
 4. [x] **Backpressure policies:** `BLOCK`, `DROP_OLDEST`, `FAIL` (FR-5.3).
 5. [x] **Retry engine:** error-code classification table (retryable: 202, 252, 209, 210, 203, 159, 999; terminal: 47, 53, 60, 62, 81, 192), exponential backoff with full jitter, max attempts. MEMORY_LIMIT_EXCEEDED (241) and TOO_MANY_PARTS (252) halve batch size on retry.
 6. [x] **Dead-letter hook:** `BatchFailureHandler` callback receiving the failed rows + cause.

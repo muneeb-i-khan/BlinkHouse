@@ -8,7 +8,7 @@ First stable release of BlinkHouse, a ClickHouse-native persistence framework fo
 
 **Read & write path**
 - `ChTemplate` — the central facade: typed queries, native SQL, streaming reads, single-row and batch inserts
-- `BatchWriter<T>` — high-throughput buffered ingest with ring-buffer, three flush triggers (rows / bytes / elapsed), configurable backpressure (`BLOCK` / `DROP_OLDEST` / `FAIL`), automatic retry with exponential backoff and dead-letter dispatch
+- `BatchWriter<T>` — high-throughput buffered ingest with bounded queue, three flush triggers (rows / bytes / elapsed), configurable backpressure (`BLOCK` / `DROP_OLDEST` / `FAIL`), automatic retry with exponential backoff and dead-letter dispatch
 - `RowBinaryWriter` — zero-copy columnar serialisation direct to the wire format; no intermediate `Object[]` or JDBC batch
 
 **Type system**

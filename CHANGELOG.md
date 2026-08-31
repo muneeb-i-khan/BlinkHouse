@@ -12,7 +12,7 @@ First stable release. API freeze on all types not in `*.internal.*` packages.
 
 ### Added — Core (`blinkhouse-core`)
 - **Read path**: `ChTemplate.queryForList`, `query(SelectStatement, RowMapper)`, full type registry
-- **Write path**: `BatchWriter` with ring-buffer, `RowBinaryWriter`, flush on count/bytes/elapsed, backpressure
+- **Write path**: `BatchWriter` with bounded queue, `RowBinaryWriter`, flush on count/bytes/elapsed, backpressure
 - **Schema & DDL**: `SchemaManager`, `DdlGenerator`, `SchemaDiff`, `SchemaIntrospector`, migration script writer
 - **Query DSL**: `ChQuery` fluent builder, `Functions` library, `SqlRenderer`, `BoundStatement`, typed metamodel via annotation processor
 - **Spring Boot Starter**: `@BlinkHouseTest` slice, `BlinkHouseAutoConfiguration`, `BlinkHouseProperties`, Spring Data repository support

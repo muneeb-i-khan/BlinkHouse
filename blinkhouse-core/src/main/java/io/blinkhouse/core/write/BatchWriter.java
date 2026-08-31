@@ -30,7 +30,7 @@ import org.slf4j.LoggerFactory;
 /**
  * High-throughput buffered writer for ClickHouse.
  *
- * <p>Internally maintains an MPSC ring buffer (bounded {@link ArrayBlockingQueue}).
+ * <p>Internally maintains a bounded {@link ArrayBlockingQueue} as an MPSC buffer.
  * Background flusher threads drain the buffer into RowBinary HTTP POST requests.
  * Three flush triggers fire independently: row count, byte size, and time interval.
  *

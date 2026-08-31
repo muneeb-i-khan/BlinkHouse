@@ -134,7 +134,7 @@ Both the DSL and native SQL funnel through it, which is how P4 (escape-hatch par
 achieved structurally rather than by discipline.
 
 ### 5.4 `BatchWriter<T>` (L5/L4)
-A bounded, self-flushing ingest buffer. Owns: ring buffer, flush scheduler, background
+A bounded, self-flushing ingest buffer. Owns: bounded queue, flush scheduler, background
 flusher pool, retry engine, backpressure policy, dead-letter dispatch, drain-on-shutdown.
 
 *Design stance:* this is the **primary** write API. `insert(T)` exists, is instrumented as
@@ -183,7 +183,7 @@ pulls `pageSize + 1` rows to determine `hasNext` without a `COUNT(*)`.
 writer.add(event)
    │
    ▼
-Ring buffer ──(full?)──► Backpressure policy: BLOCK | DROP_OLDEST | FAIL
+Bounded queue ──(full?)──► Backpressure policy: BLOCK | DROP_OLDEST | FAIL
    │
    ▼ (flush trigger: rowCount ≥ N  ∨  bytes ≥ B  ∨  elapsed ≥ T)
 Flusher thread
@@ -247,7 +247,7 @@ SchemaMode?
 | Metadata cache | Immutable after startup; lock-free reads. |
 | `TypeRegistry` | Copy-on-write; mutation only during initialisation. |
 | Connection pool | Apache HttpClient 5 `PoolingHttpClientConnectionManager`. One pool per `ChTemplate` (shared with all `BatchWriter` children). Background evictor removes idle/half-open connections. `ChTemplate` implements `Closeable`; Spring releases the pool on context shutdown. |
-| `BatchWriter` | MPSC ring buffer (many producers, dedicated flusher pool). Flusher count configurable; ordering guaranteed *within* a batch, not across batches. |
+| `BatchWriter` | MPSC bounded queue (`ArrayBlockingQueue`, many producers, dedicated flusher pool). Flusher count configurable; ordering guaranteed *within* a batch, not across batches. |
 | Streaming reads | Cursor bound to a borrowed connection; must be closed. Leak detector logs unclosed streams. |
 
 **Explicit non-guarantee:** ClickORM makes no global ordering guarantee across concurrent
